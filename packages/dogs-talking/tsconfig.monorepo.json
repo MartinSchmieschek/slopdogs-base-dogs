@@ -4,9 +4,6 @@
   "extends": "./tsconfig.json",
   "references": [
     {
-      "path": "../core/tsconfig.monorepo.json"
-    },
-    {
       "path": "../dogs-demo/tsconfig.monorepo.json"
     }
   ]

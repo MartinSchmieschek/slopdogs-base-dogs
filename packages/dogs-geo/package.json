@@ -1,6 +1,6 @@
 {
   "name": "@martinschmieschek/slopdogs-dogs-geo",
-  "version": "0.2.0-beta.0",
+  "version": "0.3.0",
   "description": "Geodaten: Bloodhound (ORS) und OpenStreetMap/Overpass",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -25,14 +25,16 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/MartinSchmieschek/SlopDogs.git",
+    "url": "https://github.com/MartinSchmieschek/slopdogs-base-dogs.git",
     "directory": "packages/dogs-geo"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
   },
   "engines": {
     "node": ">=18.19.0"
   },
   "license": "MIT",
-  "private": true,
   "scripts": {
     "build": "tsc -p tsconfig.json && slopdogs-typedefs build",
     "prepare": "node -e \"let p=require('path'),d=process.cwd();while(d!==(d=p.dirname(d)))try{if(require(p.join(d,'package.json')).workspaces)process.exit(0)}catch{}process.exit(1)\" || npm run build"
@@ -42,13 +44,13 @@
     "polygon-clipping": "^0.15.7"
   },
   "peerDependencies": {
-    "@martinschmieschek/slopdogs-core": "^0.2.0-beta.0",
-    "@martinschmieschek/slopdogs-geo-pact": "^0.2.0-beta.0"
+    "@martinschmieschek/slopdogs-core": "^0.3.0",
+    "@martinschmieschek/slopdogs-geo-pact": "^0.3.0"
   },
   "devDependencies": {
-    "@martinschmieschek/slopdogs-core": "file:../core",
-    "@martinschmieschek/slopdogs-geo-pact": "file:../geo-pact",
-    "@martinschmieschek/slopdogs-typedefs": "file:../typedefs",
+    "@martinschmieschek/slopdogs-core": "git+https://github.com/MartinSchmieschek/slopdogs-core.git#v0.3.0",
+    "@martinschmieschek/slopdogs-geo-pact": "^0.3.0",
+    "@martinschmieschek/slopdogs-typedefs": "https://github.com/MartinSchmieschek/slopdogs-core/releases/download/v0.3.0/martinschmieschek-slopdogs-typedefs-0.3.0.tgz",
     "@types/geojson": "^7946.0.16",
     "@types/node": "^20.0.0",
     "typescript": "^5.0.0"
