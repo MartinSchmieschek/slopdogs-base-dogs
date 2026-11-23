@@ -63,7 +63,8 @@ export class AirQualityRetriever extends Dog<AirQualityResult> implements ICache
 
         // Open-Meteo Air Quality aktualisiert stuendlich — 30 min TTL + 1-km-Grid
         // reichen; GPS-Jitter darf keine Misses ausloesen.
-        const key = geoBucketKey('air-quality', lat, lng, 1000);
+        // bucketM ausdruecklich — 1000 allein ist der Radius und ergaebe 200-m-Zellen.
+        const key = geoBucketKey('air-quality', lat, lng, 1000, { bucketM: 1000 });
 
         if (this.cacheHandler) {
             return this.cacheHandler.getOrFetch(key, GEO_CACHE_TTL_AIR_QUALITY_MS, () => getAirQuality(lat, lng));
