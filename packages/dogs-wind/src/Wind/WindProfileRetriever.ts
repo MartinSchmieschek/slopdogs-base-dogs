@@ -9,20 +9,19 @@
 
 import { Dog, IHuntingSeason, type ICacheHandler, type ICacheable } from '@martinschmieschek/slopdogs-core';
 import {
-    OPEN_METEO_FORECAST_URL,
+    OPEN_METEO_FORECAST_DAYS,
     OPEN_METEO_SOURCE,
     aggregate,
     clampInt,
-    fetchOpenMeteo,
+    fetchCellVariables,
+    forecastCellRequest,
     groupByDate,
     hourlyRows,
     hourlyUnits,
-    hourlyVariables,
-    openMeteoCacheKey,
-    openMeteoUrl,
     parseLatLng,
+    sliceDays,
     toLocation,
-    todayUtc,
+    withStale,
     type DogClass,
 } from '@martinschmieschek/slopdogs-openmeteo';
 import type { WindDay, WindHour, WindProfileResult } from './interfaces/windTypes';
@@ -60,13 +59,13 @@ function windDays(hours: WindHour[]): WindDay[] {
     }));
 }
 
-export async function getWindProfile(lat: number, lng: number, days: number): Promise<WindProfileResult> {
-    const data = await fetchOpenMeteo(
-        openMeteoUrl(OPEN_METEO_FORECAST_URL, lat, lng, { hourly: hourlyVariables(FIELDS), forecast_days: days }),
-        'wind',
-    );
+export async function getWindProfile(lat: number, lng: number, days: number, cache?: ICacheHandler): Promise<WindProfileResult> {
+    const data = sliceDays(await fetchCellVariables(cache, forecastCellRequest(lat, lng, { hourly: Object.values(FIELDS) }, TTL_MS)), days);
     const hours: WindHour[] = hourlyRows(data, FIELDS);
-    return { location: toLocation(data), hours, days: windDays(hours), units: hourlyUnits(data, FIELDS), source: OPEN_METEO_SOURCE };
+    return withStale(
+        { location: toLocation(data), hours, days: windDays(hours), units: hourlyUnits(data, FIELDS), source: OPEN_METEO_SOURCE },
+        data,
+    );
 }
 
 export class WindProfileRetriever extends Dog<WindProfileResult> implements ICacheable {
@@ -79,7 +78,7 @@ export class WindProfileRetriever extends Dog<WindProfileResult> implements ICac
         return WindProfileRetriever.name;
     }
     get description(): string {
-        return 'Hourly wind profile forecast: speed and direction at 10/80/120/180 m plus 10 m gusts (m/s), with daily gust max and 120 m mean, for GPS coordinates. Open-Meteo, cached 30 min per 1 km cell.';
+        return 'Hourly wind profile forecast: speed and direction at 10/80/120/180 m plus 10 m gusts (m/s), with daily gust max and 120 m mean, for GPS coordinates. Up to 7 days. Shared Open-Meteo cell cache, data up to 30 min old.';
     }
     get icon(): string | undefined {
         return '🌬️';
@@ -95,10 +94,8 @@ export class WindProfileRetriever extends Dog<WindProfileResult> implements ICac
         const queryDog = season.exhausted.find((d) => this.matchesParent(WindProfileQueryPact, d));
         const query = (queryDog?.collected as WindProfileQuery | undefined) ?? ({} as WindProfileQuery);
         const { lat, lng } = parseLatLng(query, this.name);
-        const days = clampInt(query.days, 3, 1, 16);
+        const days = clampInt(query.days, 3, 1, OPEN_METEO_FORECAST_DAYS);
 
-        const fetchIt = () => getWindProfile(lat, lng, days);
-        if (!this.cacheHandler) return fetchIt();
-        return this.cacheHandler.getOrFetch(openMeteoCacheKey('wind', lat, lng, { days, date: todayUtc() }), TTL_MS, fetchIt);
+        return getWindProfile(lat, lng, days, this.cacheHandler);
     };
 }

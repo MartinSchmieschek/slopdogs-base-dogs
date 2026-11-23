@@ -7,13 +7,20 @@
  *  a free, keyless gateway to atmospheric data across the globe.
  *  No API key required — the sky grants passage freely, matey.
  *
- *  Endpoint: https://api.open-meteo.com/v1/forecast
+ *  Endpoint: https://api.open-meteo.com/v1/forecast, via the shared
+ *  Open-Meteo cell store (slopdogs-openmeteo).
  * =========================================================================
  */
 
+import { GEO_CACHE_TTL_WEATHER_MS, type ICacheHandler } from '@martinschmieschek/slopdogs-core';
+import {
+    OPEN_METEO_FORECAST_DAYS,
+    OPEN_METEO_FORECAST_URL,
+    fetchCellVariables,
+    sliceDays,
+    withStale,
+} from '@martinschmieschek/slopdogs-openmeteo';
 import type { CurrentWeather, HourlyForecast, WeatherResult } from './interfaces/weatherTypes';
-
-const OPEN_METEO_BASE = 'https://api.open-meteo.com/v1/forecast';
 
 /** WMO Weather Code -> menschenlesbare Beschreibung */
 const WMO_DESCRIPTIONS: Record<number, string> = {
@@ -51,41 +58,37 @@ function describeWeatherCode(code: number): string {
     return WMO_DESCRIPTIONS[code] ?? `Unbekannt (${code})`;
 }
 
+/** Wetter haelt eine Viertelstunde (wie bisher GEO_CACHE_TTL_WEATHER_MS). */
+const WEATHER_MAX_AGE_MS = GEO_CACHE_TTL_WEATHER_MS;
+/** Stunden der Vorhersage: zwei Tage ab heute. */
+const FORECAST_DAYS = 2;
+/** Wind in km/h wie seit jeher — darum eine eigene Zelle neben der m/s-Zelle der Themen-Dogs. */
+const WEATHER_PARAMS = { forecast_days: OPEN_METEO_FORECAST_DAYS, wind_speed_unit: 'kmh' };
+const CURRENT = ['temperature_2m', 'apparent_temperature', 'relative_humidity_2m', 'weathercode', 'windspeed_10m', 'winddirection_10m'];
+const HOURLY = [
+    'temperature_2m',
+    'apparent_temperature',
+    'relative_humidity_2m',
+    'weathercode',
+    'windspeed_10m',
+    'precipitation_probability',
+];
+
 /**
- * Fetch weather data from Open-Meteo.
- * Returns current conditions and 48h hourly forecast.
+ * Fetch weather data from Open-Meteo through the shared cell store.
+ * Returns current conditions and the hourly forecast of the first `forecastDays` days (max 7).
  */
-export async function fetchWeather(lat: number, lng: number, forecastDays: number = 2): Promise<any> {
-    const params = [
-        `latitude=${lat}`,
-        `longitude=${lng}`,
-        `current=temperature_2m,apparent_temperature,relative_humidity_2m,weathercode,windspeed_10m,winddirection_10m`,
-        `hourly=temperature_2m,apparent_temperature,relative_humidity_2m,weathercode,windspeed_10m,precipitation_probability`,
-        `timezone=auto`,
-        `forecast_days=${forecastDays}`,
-    ].join('&');
-
-    const url = `${OPEN_METEO_BASE}?${params}`;
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15000);
-
-    let res: Response;
-    try {
-        res = await fetch(url, {
-            headers: { Accept: 'application/json', 'User-Agent': 'SlopDogs/0.2 (+https://github.com/MartinSchmieschek/SlopDogs)' },
-            signal: controller.signal,
-        });
-    } finally {
-        clearTimeout(timer);
-    }
-
-    if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        throw new Error(`Open-Meteo failed: ${res.status} ${res.statusText} ${text.slice(0, 200)}`);
-    }
-
-    return (await res.json()) as any;
+export async function fetchWeather(lat: number, lng: number, forecastDays: number = FORECAST_DAYS, cache?: ICacheHandler): Promise<any> {
+    const data = await fetchCellVariables(cache, {
+        api: OPEN_METEO_FORECAST_URL,
+        lat,
+        lng,
+        params: WEATHER_PARAMS,
+        current: CURRENT,
+        hourly: HOURLY,
+        maxAgeMs: WEATHER_MAX_AGE_MS,
+    });
+    return sliceDays(data, forecastDays);
 }
 
 /** Parse Open-Meteo response into our typed current weather */
@@ -124,8 +127,14 @@ export function parseHourlyForecast(data: any): HourlyForecast[] {
  * Build a WeatherResult from lat/lng and an optional target time.
  * If time is given, hourly is filtered to a window around that hour.
  */
-export async function getWeather(lat: number, lng: number, targetTime?: string, targetDate?: string): Promise<WeatherResult> {
-    const data = await fetchWeather(lat, lng);
+export async function getWeather(
+    lat: number,
+    lng: number,
+    targetTime?: string,
+    targetDate?: string,
+    cache?: ICacheHandler,
+): Promise<WeatherResult> {
+    const data = await fetchWeather(lat, lng, FORECAST_DAYS, cache);
 
     const current = parseCurrentWeather(data);
     let hourly = parseHourlyForecast(data);
@@ -157,15 +166,18 @@ export async function getWeather(lat: number, lng: number, targetTime?: string, 
         }
     }
 
-    return {
-        current,
-        hourly,
-        location: {
-            lat: data.latitude,
-            lng: data.longitude,
-            elevation: data.elevation,
-            timezone: data.timezone,
+    return withStale(
+        {
+            current,
+            hourly,
+            location: {
+                lat: data.latitude,
+                lng: data.longitude,
+                elevation: data.elevation,
+                timezone: data.timezone,
+            },
+            requestedTime,
         },
-        requestedTime,
-    };
+        data,
+    );
 }

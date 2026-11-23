@@ -74,4 +74,6 @@ export interface AirQualityResult {
         lng: number;
         timezone: string;
     };
+    /** Nur gesetzt (true), wenn das Open-Meteo-Budget erschoepft ist und aeltere Daten aus dem Zellen-Speicher kommen */
+    stale?: boolean;
 }

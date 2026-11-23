@@ -1,14 +1,15 @@
 /**
- * Open-Meteo-Grundlage (slopdogs-openmeteo) und die Themen-Dogs wind, soil, snow, storm:
- * URL, Variablen (hoechstens 10), Zuschnitt auf eigene Feldnamen, Tageswerte, Einheiten,
- * Cache-Schluessel und Haltezeit. Fetch und Cache sind Attrappen — kein Netz.
+ * Open-Meteo-Grundlage (slopdogs-openmeteo) und die Themen-Dogs wind, soil, snow, storm, humidity:
+ * URL, Variablen, Zuschnitt auf eigene Feldnamen, Tageswerte, Einheiten, Zellen-Schluessel und
+ * maxAge im Zellen-Speicher. Fetch und Cache sind Attrappen — kein Netz.
  */
 
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import type { ICacheHandler } from '@martinschmieschek/slopdogs-core';
 import { KennelRun, QueryRetriever, BodyRetriever } from '@martinschmieschek/slopdogs-core/runtime';
-import { aggregate, hourlyRows, openMeteoUrl, parseLatLng, type DogClass } from '@martinschmieschek/slopdogs-openmeteo';
+import { aggregate, hourlyRows, openMeteoBudget, openMeteoUrl, parseLatLng, type DogClass } from '@martinschmieschek/slopdogs-openmeteo';
+import { MemoryCacheHandler } from './support/openMeteoKit';
 import { WindProfileRetriever, WindProfileQueryPact, type WindProfileResult } from '@martinschmieschek/slopdogs-dogs-wind';
 import {
     SoilRetriever,
@@ -19,6 +20,7 @@ import {
     type EvapotranspirationResult,
 } from '@martinschmieschek/slopdogs-dogs-soil';
 import { SnowRetriever, SnowQueryPact, type SnowResult } from '@martinschmieschek/slopdogs-dogs-snow';
+import { HumidityRetriever, HumidityQueryPact, type HumidityResult } from '@martinschmieschek/slopdogs-dogs-humidity';
 import { ThunderstormRetriever, ThunderstormQueryPact, capeLevel, type ThunderstormResult } from '@martinschmieschek/slopdogs-dogs-storm';
 
 /** Antwort im Open-Meteo-Format: zwei Tage, jede angefragte Variable mit Wert = Stundenindex, Einheit "u:<variable>". */
@@ -34,16 +36,12 @@ function fakeResponse(url: string, valueOf: (variable: string, i: number) => num
     return { latitude: 47.4, longitude: 10.98, elevation: 2962, timezone: 'Europe/Berlin', utc_offset_seconds: 3600, hourly, hourly_units };
 }
 
-class Recorder {
+/** Zellen-Speicher im Speicher, merkt sich die geschriebenen Schluessel. */
+class Recorder extends MemoryCacheHandler {
     readonly keys: string[] = [];
-    readonly ttls: number[] = [];
-    getTileFeatureCache(): undefined {
-        return undefined;
-    }
-    async getOrFetch<T>(key: string, ttl: number, factory: () => Promise<T>): Promise<T> {
+    async set<T>(key: string, value: T, ttlMs: number): Promise<void> {
         this.keys.push(key);
-        this.ttls.push(ttl);
-        return factory();
+        return super.set(key, value, ttlMs);
     }
 }
 
@@ -62,14 +60,14 @@ async function run<R>(
     pact: unknown,
     query: Record<string, string>,
     valueOf?: (variable: string, i: number) => number | null,
-): Promise<{ result: R; url: URL; cache: Recorder }> {
+    cache = new Recorder(),
+): Promise<{ result: R; url: URL; urls: string[]; cache: Recorder }> {
     const urls: string[] = [];
     const realFetch = globalThis.fetch;
     globalThis.fetch = (async (url: string) => {
         urls.push(String(url));
         return new Response(JSON.stringify(fakeResponse(String(url), valueOf)), { status: 200 });
     }) as typeof fetch;
-    const cache = new Recorder();
     try {
         const D = dog as DogClass;
         const map = new Map<string, DogClass>();
@@ -86,7 +84,7 @@ async function run<R>(
         ).run();
         const result = season.exhausted.find((x) => x.name === name)?.collected as R | undefined;
         assert.ok(result, `${name} lieferte nichts`);
-        return { result, url: new URL(urls[0]), cache };
+        return { result, url: new URL(urls[0] ?? 'https://cache.invalid'), urls, cache };
     } finally {
         globalThis.fetch = realFetch;
     }
@@ -94,13 +92,36 @@ async function run<R>(
 
 const PLACE = { lat: '47.42', lng: '10.98' };
 
-test('openmeteo: URL mit Ortszeit und m/s, mehr als 10 Variablen wirft', () => {
+/**
+ * Auffrischung eines Dogs im Zellen-Speicher: kurz davor kommt der Eintrag, kurz danach wird neu geholt. Massgeblich ist
+ * die schnellste TTL-Klasse seiner Variablen (hoechstens sein maxAge); traege Variablen kommen mit, solange es <= 10 sind.
+ */
+async function assertMaxAge(dog: unknown, pact: unknown, minutes: number): Promise<void> {
+    openMeteoBudget.reset();
+    const t0 = Date.now();
+    const cache = new Recorder();
+    mock.timers.enable({ apis: ['Date'], now: t0 });
+    try {
+        await run(dog, pact, PLACE, undefined, cache);
+        mock.timers.setTime(t0 + (minutes - 1) * 60_000);
+        assert.equal((await run(dog, pact, PLACE, undefined, cache)).urls.length, 0, `vor ${minutes} min aus dem Zellen-Speicher`);
+        mock.timers.setTime(t0 + (minutes + 1) * 60_000);
+        assert.equal((await run(dog, pact, PLACE, undefined, cache)).urls.length, 1, `nach ${minutes} min neu geholt`);
+    } finally {
+        mock.timers.reset();
+    }
+}
+
+test('openmeteo: URL mit Ortszeit und m/s, mehr als 10 Variablen erlaubt (der Speicher buendelt, das Gewicht zaehlt)', () => {
     const url = new URL(openMeteoUrl('https://api.open-meteo.com/v1/forecast', 1.5, 2.5, { hourly: 'a,b', forecast_days: 2 }));
     assert.equal(url.searchParams.get('latitude'), '1.5');
     assert.equal(url.searchParams.get('timezone'), 'auto');
     assert.equal(url.searchParams.get('wind_speed_unit'), 'ms');
     assert.equal(url.searchParams.get('forecast_days'), '2');
-    assert.throws(() => openMeteoUrl('https://x', 0, 0, { hourly: 'a,b,c,d,e,f,g,h,i,j,k' }), /11 hourly variables/);
+    assert.equal(
+        new URL(openMeteoUrl('https://x', 0, 0, { hourly: 'a,b,c,d,e,f,g,h,i,j,k' })).searchParams.get('hourly')?.split(',').length,
+        11,
+    );
 });
 
 test('openmeteo: Zeilen, Aggregat ohne null, Ortspruefung', () => {
@@ -123,24 +144,28 @@ test('WindProfileRetriever: vier Hoehen, Boeen, Tagesmaximum, 30 min', async () 
     assert.equal(result.days[0].gustMax, 23);
     assert.equal(result.days[1].speed120mMean, 35.5);
     assert.equal(result.units.speed120m, 'u:wind_speed_120m');
-    assert.match(cache.keys[0], /^wind:.*days=2/);
-    assert.deepEqual(cache.ttls, [30 * 60_000]);
+    assert.equal(url.searchParams.get('forecast_days'), '7', 'die Zelle haelt immer 7 Tage');
+    assert.equal(result.hours.length, 48);
+    assert.match(cache.keys[0], /^openmeteo-cell:.*forecast_days=7/);
+    assert.doesNotMatch(cache.keys[0], /:days=/, 'Schluessel haengt nicht an days');
+    await assertMaxAge(WindProfileRetriever, WindProfileQueryPact, 30);
 });
 
 test('SoilRetriever: fuenf Feuchte-, vier Temperaturtiefen, Tagesmittel, 1 h', async () => {
     const { result, url, cache } = await run<SoilResult>(SoilRetriever, SoilQueryPact, PLACE);
     assert.equal(url.searchParams.get('hourly')?.split(',').length, 9);
-    assert.equal(url.searchParams.get('forecast_days'), '3');
+    assert.equal(url.searchParams.get('forecast_days'), '7');
     assert.equal(result.hours[2].moisture27to81cm, 2);
     assert.equal(result.days[0].temperature6cmMean, 11.5);
-    assert.match(cache.keys[0], /^soil:/);
-    assert.deepEqual(cache.ttls, [60 * 60_000]);
+    assert.match(cache.keys[0], /^openmeteo-cell:/);
+    await assertMaxAge(SoilRetriever, SoilQueryPact, 30);
 });
 
 test('EvapotranspirationRetriever: Tagesbilanz Niederschlag minus ET0', async () => {
     const value = (v: string, i: number) => (v === 'precipitation' ? (i < 24 ? 0.5 : 0) : v === 'et0_fao_evapotranspiration' ? 0.25 : i);
     const { result, url } = await run<EvapotranspirationResult>(EvapotranspirationRetriever, EvapotranspirationQueryPact, PLACE, value);
     assert.equal(url.searchParams.get('forecast_days'), '7');
+    await assertMaxAge(EvapotranspirationRetriever, EvapotranspirationQueryPact, 30);
     assert.deepEqual(
         result.days.map((d) => [d.precipitationSum, d.et0Sum, d.waterBalance]),
         [
@@ -156,13 +181,14 @@ test('SnowRetriever: Neuschnee-Summe, tiefste Schneefallgrenze', async () => {
     assert.equal(result.days[0].snowfallSum, 24);
     assert.equal(result.days[0].snowfallHeightMin, 1770);
     assert.equal(result.hours[0].snowfallHeight, 2000);
-    assert.match(cache.keys[0], /^snow:.*days=7/);
+    assert.match(cache.keys[0], /^openmeteo-cell:/);
+    await assertMaxAge(SnowRetriever, SnowQueryPact, 30);
 });
 
 test('ThunderstormRetriever: Gewitterstunden, CAPE-Stufe, 15 min', async () => {
     const value = (v: string, i: number) =>
         v === 'weather_code' ? (i === 15 ? 95 : 3) : v === 'cape' ? (i < 24 ? 120 : 1800) : v === 'lightning_potential' ? null : i;
-    const { result, cache } = await run<ThunderstormResult>(ThunderstormRetriever, ThunderstormQueryPact, PLACE, value);
+    const { result } = await run<ThunderstormResult>(ThunderstormRetriever, ThunderstormQueryPact, PLACE, value);
     assert.equal(result.hours[15].thunder, true);
     assert.equal(result.hours[14].thunder, false);
     assert.deepEqual(
@@ -172,6 +198,30 @@ test('ThunderstormRetriever: Gewitterstunden, CAPE-Stufe, 15 min', async () => {
             [0, 'elevated', null],
         ],
     );
-    assert.deepEqual(cache.ttls, [15 * 60_000]);
+    await assertMaxAge(ThunderstormRetriever, ThunderstormQueryPact, 15);
     assert.deepEqual([capeLevel(null), capeLevel(299), capeLevel(300), capeLevel(2500)], ['unknown', 'low', 'moderate', 'high']);
+});
+
+test('HumidityRetriever: Variablen, Tageswerte, 30 min im Zellen-Speicher', async () => {
+    const value = (v: string, i: number) =>
+        v === 'relative_humidity_2m' ? (i < 24 ? 80 + (i % 2) * 10 : 70) : v === 'wet_bulb_temperature_2m' ? -i : i;
+    const { result, url, cache } = await run<HumidityResult>(HumidityRetriever, HumidityQueryPact, PLACE, value);
+    assert.equal(
+        url.searchParams.get('hourly'),
+        'dew_point_2m,relative_humidity_2m,temperature_2m,vapour_pressure_deficit,wet_bulb_temperature_2m',
+        'sortiert, damit gleiche Abrufe gleich aussehen',
+    );
+    assert.equal(url.searchParams.get('forecast_days'), '7');
+    assert.equal(result.hours[1].relativeHumidity, 90);
+    assert.deepEqual(
+        result.days.map((d) => [d.relativeHumidityMean, d.relativeHumidityMax, d.wetBulbTemperatureMin]),
+        [
+            [85, 90, -23],
+            [70, 70, -47],
+        ],
+    );
+    assert.equal(result.units.dewPoint, 'u:dew_point_2m');
+    assert.equal(result.source, 'Open-Meteo.com (CC BY 4.0)');
+    assert.match(cache.keys[0], /^openmeteo-cell:/);
+    await assertMaxAge(HumidityRetriever, HumidityQueryPact, 30);
 });

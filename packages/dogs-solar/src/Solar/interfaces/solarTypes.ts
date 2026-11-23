@@ -60,4 +60,6 @@ export interface SolarRadiationResult {
     kind: 'forecast' | 'archive' | 'satellite';
     /** Quellenangabe (CC BY 4.0 verlangt sie) */
     source: string;
+    /** Nur gesetzt (true), wenn das Open-Meteo-Budget erschoepft ist und aeltere Daten aus dem Zellen-Speicher kommen */
+    stale?: boolean;
 }

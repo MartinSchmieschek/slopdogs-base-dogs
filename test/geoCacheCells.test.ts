@@ -2,7 +2,8 @@
  * Open-Meteo-Punkt-Dogs teilen sich eine 1-km-Zelle: zwei Orte, die in verschiedenen 200-m-Zellen,
  * aber derselben 1-km-Zelle liegen, ergeben denselben Cache-Schluessel. Frueher uebergaben Weather,
  * Water und Air-Quality nur den Radius 1000 — daraus wurden 200-m-Zellen.
- * Der Cache-Handler ist eine Attrappe, die nie den Upstream ruft.
+ * Water fragt getOrFetch (Platzhalter, kein Upstream); Weather, Air-Quality und Sun lesen ihren Eintrag im
+ * Zellen-Speicher (get) und holen bei der Open-Meteo-Attrappe.
  */
 
 import { test } from 'node:test';
@@ -13,17 +14,21 @@ import { WeatherRetriever, WeatherQueryPact } from '@martinschmieschek/slopdogs-
 import { WaterRetriever, WaterQueryPact } from '@martinschmieschek/slopdogs-dogs-water';
 import { AirQualityRetriever, AirQualityQueryPact } from '@martinschmieschek/slopdogs-dogs-air-quality';
 import { SunRetriever, SunQueryPact } from '@martinschmieschek/slopdogs-dogs-sun';
+import { FakeOpenMeteo, MemoryCacheHandler } from './support/openMeteoKit';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DogClass = new (...args: any[]) => IHuntingDog<unknown>;
 
-/** Zeichnet nur den Schluessel auf und liefert einen Platzhalter — kein Netz. */
-class KeyRecorder {
+/** Zeichnet die gelesenen Schluessel auf; getOrFetch liefert einen Platzhalter — kein Netz. */
+class KeyRecorder extends MemoryCacheHandler {
     readonly keys: string[] = [];
-    getTileFeatureCache(): undefined {
-        return undefined;
+    async get<T>(key: string): Promise<T | undefined> {
+        this.keys.push(key);
+        return super.get<T>(key);
     }
-    async getOrFetch<T>(key: string): Promise<T> {
+    /** Water: Platzhalter. Der Zellen-Speicher zaehlt hier Abruf und Treffer — die gehen durch. */
+    async getOrFetch<T>(key: string, ttlMs: number, factory: () => Promise<T>): Promise<T> {
+        if (key.startsWith('openmeteo-')) return super.getOrFetch(key, ttlMs, factory);
         this.keys.push(key);
         return {} as T;
     }
@@ -41,6 +46,7 @@ function supplier(pact: unknown, query: Record<string, string>): DogClass {
 
 async function keyOf(dog: DogClass, pact: unknown, query: Record<string, string>): Promise<string> {
     const recorder = new KeyRecorder();
+    const fake = new FakeOpenMeteo(0);
     const map = new Map<string, DogClass>();
     for (const C of [QueryRetriever, BodyRetriever, dog, supplier(pact, query)]) map.set(new C().name, C);
     const name = new dog().name;
@@ -52,7 +58,9 @@ async function keyOf(dog: DogClass, pact: unknown, query: Record<string, string>
         undefined,
         [],
         recorder as unknown as ICacheHandler,
-    ).run();
+    )
+        .run()
+        .finally(() => fake.restore());
     assert.equal(recorder.keys.length, 1, `${name} hat den Cache nicht genau einmal gefragt`);
     return recorder.keys[0];
 }

@@ -1,0 +1,7 @@
+# @martinschmieschek/slopdogs-dogs-rain-radar
+
+## 0.4.0
+
+### Minor Changes
+
+- 19bfae6: New package with `RainRadarRetriever`: DWD precipitation radar (RV composite via Bright Sky `/radar`) as a small grid of 1 km cells around a GPS point — the latest radar analysis plus the nowcast in 5-minute steps up to +120 min, in mm/h, with the series for the centre cell. Query pact `RainRadarQuery` (`lat`, `lng`, `radiusKm` 0-10 default 2, `horizonMin` 0-120 in steps of 5 default 120) with clear validation errors. Shared tile cache: the DE1200 grid is split into fixed 32×32 px tiles, a request reads the 1-4 tiles of its window through `getOrFetch('rainradar:<tile>:<slot>')`, so all users share one Bright Sky fetch per tile and 5-minute slot (slot = run time + 7 min, data 7-12 min old). In-process guard of 60 Bright Sky requests per minute. On 404, 429, 5xx, timeout, network errors or a full guard the last stored run of a tile is served with `stale: true`; without one a readable error is thrown. Results carry `source` and the required attribution "Deutscher Wetterdienst (CC BY 4.0), via Bright Sky".

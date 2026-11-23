@@ -39,6 +39,8 @@ export interface SoilResult {
     days: SoilDay[];
     units: Record<string, string>;
     source: string;
+    /** Nur gesetzt (true), wenn das Open-Meteo-Budget erschoepft ist und aeltere Daten aus dem Zellen-Speicher kommen */
+    stale?: boolean;
 }
 
 /** Eine Stunde Wasserhaushalt */
@@ -77,4 +79,6 @@ export interface EvapotranspirationResult {
     days: EvapotranspirationDay[];
     units: Record<string, string>;
     source: string;
+    /** Nur gesetzt (true), wenn das Open-Meteo-Budget erschoepft ist und aeltere Daten aus dem Zellen-Speicher kommen */
+    stale?: boolean;
 }

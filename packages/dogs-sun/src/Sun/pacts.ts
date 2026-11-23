@@ -12,7 +12,7 @@ export interface SunQuery {
     lat: string;
     /** Laengengrad */
     lng: string;
-    /** Anzahl Vorhersage-Tage (default: 7, max: 16) */
+    /** Anzahl Vorhersage-Tage (default: 7, max: 7) */
     days?: string;
 }
 

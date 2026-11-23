@@ -3,7 +3,7 @@
  *  DOGS-SOLAR — Sonneneinstrahlung: Vorhersage, Archiv, Satellit
  * =========================================================================
  *
- *  Paketintern bleibt openMeteoSolar (Abruf, Cache-Schluessel, Tagessummen).
+ *  Paketintern bleibt openMeteoSolar (Strahlungsfelder, Tagessummen); Abruf und Cache: slopdogs-openmeteo.
  */
 
 export * from './Solar/SolarRadiationRetriever';

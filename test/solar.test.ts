@@ -19,6 +19,7 @@ import {
     historyTtl,
     type SolarRadiationResult,
 } from '@martinschmieschek/slopdogs-dogs-solar';
+import { MemoryCacheHandler } from './support/openMeteoKit';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DogClass = new (...args: any[]) => IHuntingDog<unknown>;
@@ -51,16 +52,19 @@ function fixture(withWeather: boolean, nullFrom?: number): unknown {
     return { latitude: 52.52, longitude: 13.41, elevation: 38, timezone: 'Europe/Berlin', utc_offset_seconds: 3600, hourly };
 }
 
-class Recorder {
+/** Cache im Speicher; merkt sich Schluessel und Haltezeit von getOrFetch (Archiv) und set (Zellen-Speicher). */
+class Recorder extends MemoryCacheHandler {
     readonly keys: string[] = [];
     readonly ttls: number[] = [];
-    getTileFeatureCache(): undefined {
-        return undefined;
-    }
     async getOrFetch<T>(key: string, ttl: number, factory: () => Promise<T>): Promise<T> {
+        if (key.startsWith('openmeteo-')) return super.getOrFetch(key, ttl, factory);
         this.keys.push(key);
         this.ttls.push(ttl);
         return factory();
+    }
+    async set<T>(key: string, value: T, ttlMs: number): Promise<void> {
+        this.keys.push(key);
+        return super.set(key, value, ttlMs);
     }
 }
 
@@ -111,13 +115,13 @@ async function run(
 
 const BERLIN = { lat: '52.52', lng: '13.41' };
 
-test('SolarRadiationRetriever: Vorhersage-URL, Stunden, Tagessummen, Schluessel, 30 min', async () => {
+test('SolarRadiationRetriever: Vorhersage-URL, Stunden, Tagessummen, Zellen-Schluessel, 30 min', async () => {
     const r = await run(SolarRadiationRetriever as unknown as DogClass, SolarRadiationQueryPact, { ...BERLIN, days: '5' }, fixture(true));
     assert.ok(r.result, r.error);
     const url = new URL(r.urls[0]);
     assert.equal(url.host, 'api.open-meteo.com');
-    assert.equal(url.searchParams.get('forecast_days'), '5');
-    assert.equal(url.searchParams.get('hourly')?.split(',').length, 7, 'hoechstens 10 Variablen — sonst zaehlt Open-Meteo mehrfach');
+    assert.equal(url.searchParams.get('forecast_days'), '7', 'die Vorhersage-Zelle haelt immer 7 Tage');
+    assert.equal(url.searchParams.get('hourly')?.split(',').length, 7);
     assert.equal(url.searchParams.get('tilt'), null, 'keine Neigung (10-0)');
     assert.equal(r.result.kind, 'forecast');
     assert.equal(r.result.hours.length, 48);
@@ -139,13 +143,13 @@ test('SolarRadiationRetriever: Vorhersage-URL, Stunden, Tagessummen, Schluessel,
         hoursWithData: 24,
     });
     assert.match(r.result.source, /CC BY 4\.0/);
-    assert.match(r.cache.keys[0], /^solar-forecast:.*days=5/);
-    assert.deepEqual(r.cache.ttls, [30 * 60_000]);
+    assert.match(r.cache.keys[0], /^openmeteo-cell:.*forecast_days=7/);
+    assert.match(new SolarRadiationRetriever().description, /data up to 30 min old/);
 });
 
-test('SolarRadiationRetriever: Tage geklemmt, ungueltiger Ort wirft', async () => {
+test('SolarRadiationRetriever: Tage auf 7 geklemmt, ungueltiger Ort wirft', async () => {
     const r = await run(SolarRadiationRetriever as unknown as DogClass, SolarRadiationQueryPact, { ...BERLIN, days: '40' }, fixture(true));
-    assert.equal(new URL(r.urls[0]).searchParams.get('forecast_days'), '16');
+    assert.equal(new URL(r.urls[0]).searchParams.get('forecast_days'), '7');
     const bad = await run(SolarRadiationRetriever as unknown as DogClass, SolarRadiationQueryPact, { lat: '95', lng: '13' }, fixture(true));
     assert.equal(bad.result, undefined);
     assert.equal(bad.urls.length, 0, 'ungueltiger Ort darf nicht abrufen');
@@ -187,10 +191,11 @@ test('SatelliteRadiationRetriever: Satelliten-URL, Zukunft (null) faellt weg, ke
     const url = new URL(r.urls[0]);
     assert.equal(url.host, 'satellite-api.open-meteo.com');
     assert.equal(url.searchParams.get('models'), 'satellite_radiation_seamless');
-    assert.equal(url.searchParams.get('past_days'), '3');
+    assert.equal(url.searchParams.get('past_days'), '7', 'die Zelle haelt immer 7 Tage, der Dog schneidet seine 3 + heute heraus');
     assert.equal(r.result.kind, 'satellite');
     assert.equal(r.result.hours.length, 40);
     assert.equal(r.result.hours[0].temperature, undefined);
     assert.equal(r.result.days[1].hoursWithData, 16);
-    assert.deepEqual(r.cache.ttls, [15 * 60_000]);
+    assert.match(r.cache.keys[0], /^openmeteo-cell:.*models=satellite_radiation_seamless.*past_days=7/);
+    assert.match(new SatelliteRadiationRetriever().description, /data up to 15 min old/);
 });

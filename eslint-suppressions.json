@@ -32,7 +32,7 @@
   },
   "packages/dogs-astronomy/src/Astronomy/AstronomyRetriever.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 3
+      "count": 2
     }
   },
   "packages/dogs-biodiversity/src/Biodiversity/SpeciesRetriever.ts": {
@@ -664,7 +664,7 @@
   },
   "packages/dogs-weather/src/Weather/weatherApiClient.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 4
+      "count": 3
     }
   },
   "packages/dogs-web-archive/src/Wayback/WaybackRetriever.ts": {

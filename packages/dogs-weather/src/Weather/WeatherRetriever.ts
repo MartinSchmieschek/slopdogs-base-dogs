@@ -12,15 +12,7 @@
  * =========================================================================
  */
 
-import {
-    Dog,
-    IHuntingDog,
-    IHuntingSeason,
-    type ICacheHandler,
-    type ICacheable,
-    geoBucketKey,
-    GEO_CACHE_TTL_WEATHER_MS,
-} from '@martinschmieschek/slopdogs-core';
+import { Dog, IHuntingDog, IHuntingSeason, type ICacheHandler, type ICacheable } from '@martinschmieschek/slopdogs-core';
 import { getWeather } from './weatherApiClient';
 import type { WeatherResult } from './interfaces/weatherTypes';
 import { WeatherQueryPact, type WeatherQuery } from './pacts';
@@ -43,7 +35,7 @@ export class WeatherRetriever extends Dog<WeatherResult> implements ICacheable {
     }
 
     get description(): string {
-        return 'Fetches current weather and hourly forecast from Open-Meteo for given GPS coordinates.';
+        return 'Fetches current weather and hourly forecast from Open-Meteo for given GPS coordinates. Shared Open-Meteo cell cache, data up to 15 min old.';
     }
 
     get icon(): string | undefined {
@@ -69,21 +61,6 @@ export class WeatherRetriever extends Dog<WeatherResult> implements ICacheable {
             throw new Error('WeatherRetriever: Missing required query params (lat, lng)');
         }
 
-        // Wetter ist auf 1-km-Kacheln gebucketet (bucketM ausdruecklich — 1000 allein ist der
-        // Radius und ergaebe 200-m-Zellen). Open-Meteo liefert ohnehin
-        // nur auf diesem Grid aufgeloeste Vorhersagen, GPS-Jitter soll keine
-        // Cache-Misses ausloesen.
-        const key = geoBucketKey('weather', lat, lng, 1000, {
-            bucketM: 1000,
-            extras: {
-                date: query['date'] ?? 'today',
-                time: query['time'] ?? 'now',
-            },
-        });
-
-        if (this.cacheHandler) {
-            return this.cacheHandler.getOrFetch(key, GEO_CACHE_TTL_WEATHER_MS, () => getWeather(lat, lng, query['time'], query['date']));
-        }
-        return getWeather(lat, lng, query['time'], query['date']);
+        return getWeather(lat, lng, query['time'], query['date'], this.cacheHandler);
     };
 }

@@ -9,15 +9,7 @@
  * =========================================================================
  */
 
-import {
-    Dog,
-    IHuntingDog,
-    IHuntingSeason,
-    type ICacheHandler,
-    type ICacheable,
-    geoBucketKey,
-    GEO_CACHE_TTL_AIR_QUALITY_MS,
-} from '@martinschmieschek/slopdogs-core';
+import { Dog, IHuntingDog, IHuntingSeason, type ICacheHandler, type ICacheable } from '@martinschmieschek/slopdogs-core';
 import { getAirQuality } from './airQualityApiClient';
 import type { AirQualityResult } from './interfaces/airQualityTypes';
 import { AirQualityQueryPact, type AirQualityQuery } from './pacts';
@@ -38,7 +30,7 @@ export class AirQualityRetriever extends Dog<AirQualityResult> implements ICache
         return AirQualityRetriever.name;
     }
     get description(): string {
-        return 'Fetches current air quality index and pollutant levels from Open-Meteo.';
+        return 'Fetches current air quality index and pollutant levels from Open-Meteo. Shared Open-Meteo cell cache, data up to 30 min old.';
     }
     get icon(): string | undefined {
         return '\uD83C\uDF2B\uFE0F';
@@ -61,14 +53,6 @@ export class AirQualityRetriever extends Dog<AirQualityResult> implements ICache
             throw new Error('AirQualityRetriever: Missing required query params (lat, lng)');
         }
 
-        // Open-Meteo Air Quality aktualisiert stuendlich — 30 min TTL + 1-km-Grid
-        // reichen; GPS-Jitter darf keine Misses ausloesen.
-        // bucketM ausdruecklich — 1000 allein ist der Radius und ergaebe 200-m-Zellen.
-        const key = geoBucketKey('air-quality', lat, lng, 1000, { bucketM: 1000 });
-
-        if (this.cacheHandler) {
-            return this.cacheHandler.getOrFetch(key, GEO_CACHE_TTL_AIR_QUALITY_MS, () => getAirQuality(lat, lng));
-        }
-        return getAirQuality(lat, lng);
+        return getAirQuality(lat, lng, this.cacheHandler);
     };
 }
