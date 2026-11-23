@@ -69,10 +69,12 @@ export class WeatherRetriever extends Dog<WeatherResult> implements ICacheable {
             throw new Error('WeatherRetriever: Missing required query params (lat, lng)');
         }
 
-        // Wetter ist auf 1-km-Kacheln gebucketet — Open-Meteo liefert ohnehin
+        // Wetter ist auf 1-km-Kacheln gebucketet (bucketM ausdruecklich — 1000 allein ist der
+        // Radius und ergaebe 200-m-Zellen). Open-Meteo liefert ohnehin
         // nur auf diesem Grid aufgeloeste Vorhersagen, GPS-Jitter soll keine
         // Cache-Misses ausloesen.
         const key = geoBucketKey('weather', lat, lng, 1000, {
+            bucketM: 1000,
             extras: {
                 date: query['date'] ?? 'today',
                 time: query['time'] ?? 'now',

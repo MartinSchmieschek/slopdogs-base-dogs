@@ -57,7 +57,8 @@ export class WaterRetriever extends Dog<WaterResult> implements ICacheable {
             throw new Error('WaterRetriever: Missing required query params (lat, lng)');
         }
 
-        const key = geoBucketKey('water', lat, lng, 1000);
+        // 1-km-Zelle (bucketM ausdruecklich — 1000 allein ist der Radius und ergaebe 200-m-Zellen).
+        const key = geoBucketKey('water', lat, lng, 1000, { bucketM: 1000 });
 
         if (this.cacheHandler) {
             return this.cacheHandler.getOrFetch(key, 15 * 60_000, () => getWaterConditions(lat, lng));
