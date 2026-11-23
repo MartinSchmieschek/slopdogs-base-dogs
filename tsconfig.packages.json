@@ -116,6 +116,9 @@
       "path": "./packages/dogs-sports/tsconfig.monorepo.json"
     },
     {
+      "path": "./packages/dogs-solar/tsconfig.monorepo.json"
+    },
+    {
       "path": "./packages/dogs-sun/tsconfig.monorepo.json"
     },
     {
@@ -156,6 +159,21 @@
     },
     {
       "path": "./packages/geo-pact/tsconfig.monorepo.json"
+    },
+    {
+      "path": "./packages/openmeteo/tsconfig.monorepo.json"
+    },
+    {
+      "path": "./packages/dogs-wind/tsconfig.monorepo.json"
+    },
+    {
+      "path": "./packages/dogs-soil/tsconfig.monorepo.json"
+    },
+    {
+      "path": "./packages/dogs-snow/tsconfig.monorepo.json"
+    },
+    {
+      "path": "./packages/dogs-storm/tsconfig.monorepo.json"
     }
   ]
 }
