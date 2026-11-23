@@ -1,6 +1,6 @@
 {
   "name": "@martinschmieschek/slopdogs-dogs-storm",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Gewitter: CAPE, Lifted Index, CIN, Blitzpotenzial und Boeen per GPS von Open-Meteo",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -37,11 +37,11 @@
   },
   "peerDependencies": {
     "@martinschmieschek/slopdogs-core": "^0.3.0",
-    "@martinschmieschek/slopdogs-openmeteo": "^0.3.0"
+    "@martinschmieschek/slopdogs-openmeteo": "^0.4.0"
   },
   "devDependencies": {
     "@martinschmieschek/slopdogs-core": "git+https://github.com/MartinSchmieschek/slopdogs-core.git#v0.3.0",
-    "@martinschmieschek/slopdogs-openmeteo": "^0.3.0",
+    "@martinschmieschek/slopdogs-openmeteo": "^0.4.0",
     "@martinschmieschek/slopdogs-typedefs": "https://github.com/MartinSchmieschek/slopdogs-core/releases/download/v0.3.0/martinschmieschek-slopdogs-typedefs-0.3.0.tgz",
     "@types/node": "^20.0.0",
     "typescript": "^5.0.0"

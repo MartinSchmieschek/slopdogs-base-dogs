@@ -1,6 +1,6 @@
 {
   "name": "@martinschmieschek/slopdogs-openmeteo",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Open-Meteo-Grundlage fuer Base-Dogs: gemeinsamer Zellen-Speicher (1-km-Zelle) mit Budget-Waechter, Abruf, Stundenspalten, Quellenangabe",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
