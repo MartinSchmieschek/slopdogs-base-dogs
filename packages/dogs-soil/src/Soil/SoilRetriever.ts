@@ -6,20 +6,19 @@
 
 import { Dog, IHuntingSeason, type ICacheHandler, type ICacheable } from '@martinschmieschek/slopdogs-core';
 import {
-    OPEN_METEO_FORECAST_URL,
+    OPEN_METEO_FORECAST_DAYS,
     OPEN_METEO_SOURCE,
     aggregate,
     clampInt,
-    fetchOpenMeteo,
+    fetchCellVariables,
+    forecastCellRequest,
     groupByDate,
     hourlyRows,
     hourlyUnits,
-    hourlyVariables,
-    openMeteoCacheKey,
-    openMeteoUrl,
     parseLatLng,
+    sliceDays,
     toLocation,
-    todayUtc,
+    withStale,
     type DogClass,
 } from '@martinschmieschek/slopdogs-openmeteo';
 import type { SoilDay, SoilHour, SoilResult } from './interfaces/soilTypes';
@@ -54,13 +53,13 @@ function soilDays(hours: SoilHour[]): SoilDay[] {
     }));
 }
 
-export async function getSoil(lat: number, lng: number, days: number): Promise<SoilResult> {
-    const data = await fetchOpenMeteo(
-        openMeteoUrl(OPEN_METEO_FORECAST_URL, lat, lng, { hourly: hourlyVariables(FIELDS), forecast_days: days }),
-        'soil',
-    );
+export async function getSoil(lat: number, lng: number, days: number, cache?: ICacheHandler): Promise<SoilResult> {
+    const data = sliceDays(await fetchCellVariables(cache, forecastCellRequest(lat, lng, { hourly: Object.values(FIELDS) }, TTL_MS)), days);
     const hours: SoilHour[] = hourlyRows(data, FIELDS);
-    return { location: toLocation(data), hours, days: soilDays(hours), units: hourlyUnits(data, FIELDS), source: OPEN_METEO_SOURCE };
+    return withStale(
+        { location: toLocation(data), hours, days: soilDays(hours), units: hourlyUnits(data, FIELDS), source: OPEN_METEO_SOURCE },
+        data,
+    );
 }
 
 export class SoilRetriever extends Dog<SoilResult> implements ICacheable {
@@ -73,7 +72,7 @@ export class SoilRetriever extends Dog<SoilResult> implements ICacheable {
         return SoilRetriever.name;
     }
     get description(): string {
-        return 'Hourly soil forecast: soil temperature at 0/6/18/54 cm (°C) and soil moisture in five layers 0-81 cm (m³/m³), with daily means, for GPS coordinates. For gardening, frost in the ground, sowing. Open-Meteo, cached 1 h per 1 km cell.';
+        return 'Hourly soil forecast: soil temperature at 0/6/18/54 cm (°C) and soil moisture in five layers 0-81 cm (m³/m³), with daily means, for GPS coordinates. For gardening, frost in the ground, sowing. Up to 7 days. Shared Open-Meteo cell cache, data up to 60 min old.';
     }
     get icon(): string | undefined {
         return '🪴';
@@ -89,10 +88,8 @@ export class SoilRetriever extends Dog<SoilResult> implements ICacheable {
         const queryDog = season.exhausted.find((d) => this.matchesParent(SoilQueryPact, d));
         const query = (queryDog?.collected as SoilQuery | undefined) ?? ({} as SoilQuery);
         const { lat, lng } = parseLatLng(query, this.name);
-        const days = clampInt(query.days, 3, 1, 16);
+        const days = clampInt(query.days, 3, 1, OPEN_METEO_FORECAST_DAYS);
 
-        const fetchIt = () => getSoil(lat, lng, days);
-        if (!this.cacheHandler) return fetchIt();
-        return this.cacheHandler.getOrFetch(openMeteoCacheKey('soil', lat, lng, { days, date: todayUtc() }), TTL_MS, fetchIt);
+        return getSoil(lat, lng, days, this.cacheHandler);
     };
 }

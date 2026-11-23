@@ -6,20 +6,19 @@
 
 import { Dog, IHuntingSeason, type ICacheHandler, type ICacheable } from '@martinschmieschek/slopdogs-core';
 import {
-    OPEN_METEO_FORECAST_URL,
+    OPEN_METEO_FORECAST_DAYS,
     OPEN_METEO_SOURCE,
     aggregate,
     clampInt,
-    fetchOpenMeteo,
+    fetchCellVariables,
+    forecastCellRequest,
     groupByDate,
     hourlyRows,
     hourlyUnits,
-    hourlyVariables,
-    openMeteoCacheKey,
-    openMeteoUrl,
     parseLatLng,
+    sliceDays,
     toLocation,
-    todayUtc,
+    withStale,
     type DogClass,
 } from '@martinschmieschek/slopdogs-openmeteo';
 import type { ThunderstormDay, ThunderstormHour, ThunderstormResult } from './interfaces/stormTypes';
@@ -73,22 +72,22 @@ export function thunderstormDays(hours: ThunderstormHour[]): ThunderstormDay[] {
     });
 }
 
-export async function getThunderstorm(lat: number, lng: number, days: number): Promise<ThunderstormResult> {
-    const data = await fetchOpenMeteo(
-        openMeteoUrl(OPEN_METEO_FORECAST_URL, lat, lng, { hourly: hourlyVariables(FIELDS), forecast_days: days }),
-        'thunderstorm',
-    );
+export async function getThunderstorm(lat: number, lng: number, days: number, cache?: ICacheHandler): Promise<ThunderstormResult> {
+    const data = sliceDays(await fetchCellVariables(cache, forecastCellRequest(lat, lng, { hourly: Object.values(FIELDS) }, TTL_MS)), days);
     const hours: ThunderstormHour[] = hourlyRows(data, FIELDS).map((r) => ({
         ...r,
         thunder: r.weatherCode !== null && r.weatherCode >= 95,
     }));
-    return {
-        location: toLocation(data),
-        hours,
-        days: thunderstormDays(hours),
-        units: hourlyUnits(data, FIELDS),
-        source: OPEN_METEO_SOURCE,
-    };
+    return withStale(
+        {
+            location: toLocation(data),
+            hours,
+            days: thunderstormDays(hours),
+            units: hourlyUnits(data, FIELDS),
+            source: OPEN_METEO_SOURCE,
+        },
+        data,
+    );
 }
 
 export class ThunderstormRetriever extends Dog<ThunderstormResult> implements ICacheable {
@@ -101,7 +100,7 @@ export class ThunderstormRetriever extends Dog<ThunderstormResult> implements IC
         return ThunderstormRetriever.name;
     }
     get description(): string {
-        return 'Hourly thunderstorm potential: CAPE, lifted index, convective inhibition, lightning potential index (Europe/ICON only), gusts, precipitation, weather code with thunder flag, plus daily max values and a CAPE-based level (low/moderate/elevated/high), for GPS coordinates. Open-Meteo, cached 15 min per 1 km cell.';
+        return 'Hourly thunderstorm potential: CAPE, lifted index, convective inhibition, lightning potential index (Europe/ICON only), gusts, precipitation, weather code with thunder flag, plus daily max values and a CAPE-based level (low/moderate/elevated/high), for GPS coordinates. Up to 7 days. Shared Open-Meteo cell cache, data up to 15 min old.';
     }
     get icon(): string | undefined {
         return '⛈️';
@@ -117,10 +116,8 @@ export class ThunderstormRetriever extends Dog<ThunderstormResult> implements IC
         const queryDog = season.exhausted.find((d) => this.matchesParent(ThunderstormQueryPact, d));
         const query = (queryDog?.collected as ThunderstormQuery | undefined) ?? ({} as ThunderstormQuery);
         const { lat, lng } = parseLatLng(query, this.name);
-        const days = clampInt(query.days, 3, 1, 16);
+        const days = clampInt(query.days, 3, 1, OPEN_METEO_FORECAST_DAYS);
 
-        const fetchIt = () => getThunderstorm(lat, lng, days);
-        if (!this.cacheHandler) return fetchIt();
-        return this.cacheHandler.getOrFetch(openMeteoCacheKey('thunderstorm', lat, lng, { days, date: todayUtc() }), TTL_MS, fetchIt);
+        return getThunderstorm(lat, lng, days, this.cacheHandler);
     };
 }

@@ -12,7 +12,7 @@ export interface SoilQuery {
     lat: string;
     /** Laengengrad */
     lng: string;
-    /** Vorhersage-Tage ab heute (default: 3, max: 16) */
+    /** Vorhersage-Tage ab heute (default: 3, max: 7) */
     days?: string;
 }
 
@@ -22,7 +22,7 @@ export interface EvapotranspirationQuery {
     lat: string;
     /** Laengengrad */
     lng: string;
-    /** Vorhersage-Tage ab heute (default: 7, max: 16) */
+    /** Vorhersage-Tage ab heute (default: 7, max: 7) */
     days?: string;
 }
 

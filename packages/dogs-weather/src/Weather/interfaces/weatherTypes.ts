@@ -59,4 +59,6 @@ export interface WeatherResult {
     };
     /** Angefragte Uhrzeit (falls gesetzt), sonst null */
     requestedTime: string | null;
+    /** Nur gesetzt (true), wenn das Open-Meteo-Budget erschoepft ist und aeltere Daten aus dem Zellen-Speicher kommen */
+    stale?: boolean;
 }

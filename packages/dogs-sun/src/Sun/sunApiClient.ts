@@ -9,9 +9,15 @@
  * =========================================================================
  */
 
+import type { ICacheHandler } from '@martinschmieschek/slopdogs-core';
+import {
+    OPEN_METEO_FORECAST_DAYS,
+    fetchCellVariables,
+    forecastCellRequest,
+    sliceDays,
+    withStale,
+} from '@martinschmieschek/slopdogs-openmeteo';
 import type { SunDay, SunResult } from './interfaces/sunTypes';
-
-const OPEN_METEO_BASE = 'https://api.open-meteo.com/v1/forecast';
 
 /** UV-Index -> Risikobewertung */
 function describeUvRisk(uv: number): string {
@@ -22,40 +28,18 @@ function describeUvRisk(uv: number): string {
     return 'Extrem';
 }
 
+/** Sonnenstunden und UV-Index rechnet Open-Meteo stuendlich neu — eine Stunde halten. */
+const SUN_MAX_AGE_MS = 60 * 60_000;
+/** Dieselben Tagesvariablen liest AstronomyRetriever — beide teilen sich die Vorhersage-Zelle. */
+const SUN_DAILY_VARIABLES = ['sunrise', 'sunset', 'daylight_duration', 'sunshine_duration', 'uv_index_max'];
+
 /**
- * Fetch sun data from Open-Meteo.
+ * Fetch sun data from Open-Meteo through the shared forecast cell (1..7 days).
  */
-export async function getSunData(lat: number, lng: number, forecastDays: number = 7): Promise<SunResult> {
-    const days = Math.min(Math.max(forecastDays, 1), 16);
-    const params = [
-        `latitude=${lat}`,
-        `longitude=${lng}`,
-        `daily=sunrise,sunset,daylight_duration,sunshine_duration,uv_index_max`,
-        `timezone=auto`,
-        `forecast_days=${days}`,
-    ].join('&');
-
-    const url = `${OPEN_METEO_BASE}?${params}`;
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15000);
-
-    let res: Response;
-    try {
-        res = await fetch(url, {
-            headers: { Accept: 'application/json', 'User-Agent': 'SlopDogs/0.2 (+https://github.com/MartinSchmieschek/SlopDogs)' },
-            signal: controller.signal,
-        });
-    } finally {
-        clearTimeout(timer);
-    }
-
-    if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        throw new Error(`Open-Meteo sun failed: ${res.status} ${res.statusText} ${text.slice(0, 200)}`);
-    }
-
-    const data = (await res.json()) as any;
+export async function getSunData(lat: number, lng: number, forecastDays: number = 7, cache?: ICacheHandler): Promise<SunResult> {
+    const days = Math.min(Math.max(forecastDays, 1), OPEN_METEO_FORECAST_DAYS);
+    const cell = await fetchCellVariables(cache, forecastCellRequest(lat, lng, { daily: SUN_DAILY_VARIABLES }, SUN_MAX_AGE_MS));
+    const data = sliceDays(cell, days) as any;
     const d = data.daily;
     const times: string[] = d.time ?? [];
 
@@ -69,13 +53,16 @@ export async function getSunData(lat: number, lng: number, forecastDays: number 
         uvRisk: describeUvRisk(d.uv_index_max[i]),
     }));
 
-    return {
-        today: allDays[0],
-        forecast: allDays,
-        location: {
-            lat: data.latitude,
-            lng: data.longitude,
-            timezone: data.timezone,
+    return withStale(
+        {
+            today: allDays[0],
+            forecast: allDays,
+            location: {
+                lat: data.latitude,
+                lng: data.longitude,
+                timezone: data.timezone,
+            },
         },
-    };
+        cell,
+    );
 }

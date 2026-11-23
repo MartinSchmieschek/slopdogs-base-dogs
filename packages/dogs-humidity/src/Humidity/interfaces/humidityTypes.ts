@@ -42,4 +42,6 @@ export interface HumidityResult {
     days: HumidityDay[];
     units: Record<string, string>;
     source: string;
+    /** Nur gesetzt (true), wenn das Open-Meteo-Budget erschoepft ist und aeltere Daten aus dem Zellen-Speicher kommen */
+    stale?: boolean;
 }

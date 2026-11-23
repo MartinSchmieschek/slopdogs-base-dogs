@@ -6,20 +6,19 @@
 
 import { Dog, IHuntingSeason, type ICacheHandler, type ICacheable } from '@martinschmieschek/slopdogs-core';
 import {
-    OPEN_METEO_FORECAST_URL,
+    OPEN_METEO_FORECAST_DAYS,
     OPEN_METEO_SOURCE,
     aggregate,
     clampInt,
-    fetchOpenMeteo,
+    fetchCellVariables,
+    forecastCellRequest,
     groupByDate,
     hourlyRows,
     hourlyUnits,
-    hourlyVariables,
-    openMeteoCacheKey,
-    openMeteoUrl,
     parseLatLng,
+    sliceDays,
     toLocation,
-    todayUtc,
+    withStale,
     type DogClass,
 } from '@martinschmieschek/slopdogs-openmeteo';
 import type { HumidityDay, HumidityHour, HumidityResult } from './interfaces/humidityTypes';
@@ -46,13 +45,13 @@ function humidityDays(hours: HumidityHour[]): HumidityDay[] {
     }));
 }
 
-export async function getHumidity(lat: number, lng: number, days: number): Promise<HumidityResult> {
-    const data = await fetchOpenMeteo(
-        openMeteoUrl(OPEN_METEO_FORECAST_URL, lat, lng, { hourly: hourlyVariables(FIELDS), forecast_days: days }),
-        'humidity',
-    );
+export async function getHumidity(lat: number, lng: number, days: number, cache?: ICacheHandler): Promise<HumidityResult> {
+    const data = sliceDays(await fetchCellVariables(cache, forecastCellRequest(lat, lng, { hourly: Object.values(FIELDS) }, TTL_MS)), days);
     const hours: HumidityHour[] = hourlyRows(data, FIELDS);
-    return { location: toLocation(data), hours, days: humidityDays(hours), units: hourlyUnits(data, FIELDS), source: OPEN_METEO_SOURCE };
+    return withStale(
+        { location: toLocation(data), hours, days: humidityDays(hours), units: hourlyUnits(data, FIELDS), source: OPEN_METEO_SOURCE },
+        data,
+    );
 }
 
 export class HumidityRetriever extends Dog<HumidityResult> implements ICacheable {
@@ -65,7 +64,7 @@ export class HumidityRetriever extends Dog<HumidityResult> implements ICacheable
         return HumidityRetriever.name;
     }
     get description(): string {
-        return 'Hourly humidity forecast: temperature, relative humidity (%), dew point and wet-bulb temperature (°C), vapour pressure deficit (kPa), with daily means, for GPS coordinates. For heat pumps (defrost, icing), drying, mould risk. Open-Meteo, cached 30 min per 1 km cell.';
+        return 'Hourly humidity forecast: temperature, relative humidity (%), dew point and wet-bulb temperature (°C), vapour pressure deficit (kPa), with daily means, for GPS coordinates. For heat pumps (defrost, icing), drying, mould risk. Up to 7 days. Shared Open-Meteo cell cache, data up to 30 min old.';
     }
     get icon(): string | undefined {
         return '💧';
@@ -81,10 +80,8 @@ export class HumidityRetriever extends Dog<HumidityResult> implements ICacheable
         const queryDog = season.exhausted.find((d) => this.matchesParent(HumidityQueryPact, d));
         const query = (queryDog?.collected as HumidityQuery | undefined) ?? ({} as HumidityQuery);
         const { lat, lng } = parseLatLng(query, this.name);
-        const days = clampInt(query.days, 7, 1, 16);
+        const days = clampInt(query.days, 7, 1, OPEN_METEO_FORECAST_DAYS);
 
-        const fetchIt = () => getHumidity(lat, lng, days);
-        if (!this.cacheHandler) return fetchIt();
-        return this.cacheHandler.getOrFetch(openMeteoCacheKey('humidity', lat, lng, { days, date: todayUtc() }), TTL_MS, fetchIt);
+        return getHumidity(lat, lng, days, this.cacheHandler);
     };
 }

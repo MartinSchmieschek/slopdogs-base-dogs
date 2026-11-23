@@ -8,23 +8,22 @@ import { Dog, IHuntingSeason, type ICacheHandler, type ICacheable } from '@marti
 import type { SolarRadiationResult } from './interfaces/solarTypes';
 import { SolarRadiationQueryPact, type SolarRadiationQuery } from './pacts';
 import {
-    OPEN_METEO_FORECAST_URL,
+    OPEN_METEO_FORECAST_DAYS,
     clampInt,
-    fetchOpenMeteo,
-    openMeteoCacheKey,
-    openMeteoUrl,
+    fetchCellVariables,
+    forecastCellRequest,
     parseLatLng,
-    todayUtc,
+    sliceDays,
     type DogClass,
 } from '@martinschmieschek/slopdogs-openmeteo';
-import { solarVariables, toHours, toResult } from './openMeteoSolar';
+import { solarVariableList, toHours, toResult } from './openMeteoSolar';
 
 /** Open-Meteo rechnet die Vorhersage stuendlich neu — eine halbe Stunde halten. */
 const TTL_MS = 30 * 60_000;
 
-export async function getSolarForecast(lat: number, lng: number, days: number): Promise<SolarRadiationResult> {
-    const url = openMeteoUrl(OPEN_METEO_FORECAST_URL, lat, lng, { hourly: solarVariables(true), forecast_days: days });
-    const data = await fetchOpenMeteo(url, 'solar forecast');
+export async function getSolarForecast(lat: number, lng: number, days: number, cache?: ICacheHandler): Promise<SolarRadiationResult> {
+    const request = forecastCellRequest(lat, lng, { hourly: solarVariableList(true) }, TTL_MS);
+    const data = sliceDays(await fetchCellVariables(cache, request), days);
     return toResult(data, toHours(data, true), 'forecast');
 }
 
@@ -38,7 +37,7 @@ export class SolarRadiationRetriever extends Dog<SolarRadiationResult> implement
         return SolarRadiationRetriever.name;
     }
     get description(): string {
-        return 'Hourly solar irradiance forecast (GHI, DNI, DHI, direct horizontal; W/m², horizontal plane) plus cloud cover, temperature and wind, with daily kWh/m² sums, for GPS coordinates. Open-Meteo, cached 30 min per 1 km cell.';
+        return 'Hourly solar irradiance forecast (GHI, DNI, DHI, direct horizontal; W/m², horizontal plane) plus cloud cover, temperature and wind, with daily kWh/m² sums, for GPS coordinates. Up to 7 days. Shared Open-Meteo cell cache, data up to 30 min old.';
     }
     get icon(): string | undefined {
         return '🔆';
@@ -54,12 +53,7 @@ export class SolarRadiationRetriever extends Dog<SolarRadiationResult> implement
         const queryDog = season.exhausted.find((d) => this.matchesParent(SolarRadiationQueryPact, d));
         const query = (queryDog?.collected as SolarRadiationQuery | undefined) ?? ({} as SolarRadiationQuery);
         const { lat, lng } = parseLatLng(query, this.name);
-        const days = clampInt(query.days, 3, 1, 16);
-
-        const fetchIt = () => getSolarForecast(lat, lng, days);
-        if (!this.cacheHandler) return fetchIt();
-        // UTC-Datum im Schluessel: die Vorhersage beginnt mit dem heutigen Tag, ein Eintrag vom Vortag passt nicht.
-        const key = openMeteoCacheKey('solar-forecast', lat, lng, { days, date: todayUtc() });
-        return this.cacheHandler.getOrFetch(key, TTL_MS, fetchIt);
+        const days = clampInt(query.days, 3, 1, OPEN_METEO_FORECAST_DAYS);
+        return getSolarForecast(lat, lng, days, this.cacheHandler);
     };
 }

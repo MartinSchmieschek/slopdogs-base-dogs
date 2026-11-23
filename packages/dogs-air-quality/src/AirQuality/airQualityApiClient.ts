@@ -6,13 +6,30 @@
  *  Arr, this module speaks the tongue of the Open-Meteo Air Quality API —
  *  a free, keyless gateway to atmospheric pollutant data and pollen counts.
  *
- *  Endpoint: https://air-quality-api.open-meteo.com/v1/air-quality
+ *  Endpoint: https://air-quality-api.open-meteo.com/v1/air-quality, via the
+ *  shared Open-Meteo cell store (slopdogs-openmeteo).
  * =========================================================================
  */
 
+import { GEO_CACHE_TTL_AIR_QUALITY_MS, type ICacheHandler } from '@martinschmieschek/slopdogs-core';
+import { OPEN_METEO_AIR_QUALITY_URL, fetchCellVariables, withStale } from '@martinschmieschek/slopdogs-openmeteo';
 import type { CurrentAirQuality, PollenData, HourlyAirQuality, AirQualityResult } from './interfaces/airQualityTypes';
 
-const AQ_API_BASE = 'https://air-quality-api.open-meteo.com/v1/air-quality';
+/** Eigener Zeitraum der Luftqualitaets-Zelle: zwei Tage reichen fuer die naechsten 24 Stunden. */
+const AIR_QUALITY_PARAMS = { forecast_days: 2 };
+const CURRENT = ['european_aqi', 'pm2_5', 'pm10', 'ozone', 'nitrogen_dioxide', 'sulphur_dioxide', 'carbon_monoxide'];
+const HOURLY = [
+    'european_aqi',
+    'pm2_5',
+    'pm10',
+    'ozone',
+    'birch_pollen',
+    'grass_pollen',
+    'alder_pollen',
+    'ragweed_pollen',
+    'mugwort_pollen',
+    'olive_pollen',
+];
 
 /** European AQI -> menschenlesbare Beschreibung */
 function describeAqi(aqi: number): string {
@@ -25,39 +42,18 @@ function describeAqi(aqi: number): string {
 }
 
 /**
- * Fetch air quality and pollen data from Open-Meteo.
+ * Fetch air quality and pollen data from Open-Meteo through the shared cell store (30 min).
  */
-export async function getAirQuality(lat: number, lng: number): Promise<AirQualityResult> {
-    const params = [
-        `latitude=${lat}`,
-        `longitude=${lng}`,
-        `current=european_aqi,pm2_5,pm10,ozone,nitrogen_dioxide,sulphur_dioxide,carbon_monoxide`,
-        `hourly=european_aqi,pm2_5,pm10,ozone,birch_pollen,grass_pollen,alder_pollen,ragweed_pollen,mugwort_pollen,olive_pollen`,
-        `timezone=auto`,
-        `forecast_days=2`,
-    ].join('&');
-
-    const url = `${AQ_API_BASE}?${params}`;
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15000);
-
-    let res: Response;
-    try {
-        res = await fetch(url, {
-            headers: { Accept: 'application/json', 'User-Agent': 'SlopDogs/0.2 (+https://github.com/MartinSchmieschek/SlopDogs)' },
-            signal: controller.signal,
-        });
-    } finally {
-        clearTimeout(timer);
-    }
-
-    if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        throw new Error(`Open-Meteo Air Quality failed: ${res.status} ${res.statusText} ${text.slice(0, 200)}`);
-    }
-
-    const data = (await res.json()) as any;
+export async function getAirQuality(lat: number, lng: number, cache?: ICacheHandler): Promise<AirQualityResult> {
+    const data = (await fetchCellVariables(cache, {
+        api: OPEN_METEO_AIR_QUALITY_URL,
+        lat,
+        lng,
+        params: AIR_QUALITY_PARAMS,
+        current: CURRENT,
+        hourly: HOURLY,
+        maxAgeMs: GEO_CACHE_TTL_AIR_QUALITY_MS,
+    })) as any;
 
     // Current air quality
     const c = data.current;
@@ -107,14 +103,17 @@ export async function getAirQuality(lat: number, lng: number): Promise<AirQualit
         };
     }
 
-    return {
-        current,
-        pollen,
-        hourly,
-        location: {
-            lat: data.latitude,
-            lng: data.longitude,
-            timezone: data.timezone,
+    return withStale(
+        {
+            current,
+            pollen,
+            hourly,
+            location: {
+                lat: data.latitude,
+                lng: data.longitude,
+                timezone: data.timezone,
+            },
         },
-    };
+        data,
+    );
 }

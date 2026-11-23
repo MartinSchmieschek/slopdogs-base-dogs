@@ -3,44 +3,28 @@
  *  SLOPDOGS-OPENMETEO — die gemeinsame Grundlage der Open-Meteo-Dogs
  * =========================================================================
  *
- *  Kein Dog, nur Werkzeug: Abruf mit Timeout und lesbarem Fehler, Cache-Schluessel
- *  auf der 1-km-Zelle, Stundenspalten als Zeilen, Ort und Quellenangabe.
- *  Die Dog-Pakete (solar, wind, soil, snow, storm) haengen es als peerDependency
- *  an — wie geo-pact.
+ *  Kein Dog, nur Werkzeug: der gemeinsame Zellen-Speicher (cellStore) mit Budget-
+ *  Waechter (budget), Abruf mit Timeout und lesbarem Fehler, Cache-Schluessel auf der
+ *  1-km-Zelle, Stundenspalten als Zeilen, Ort und Quellenangabe. Die Open-Meteo-Dogs
+ *  haengen es als peerDependency an — wie geo-pact.
  *
  *  Regeln, die hier stecken:
- *  - Hoechstens 10 Variablen je Abruf: Open-Meteo zaehlt mehr als Mehrfachabruf.
- *  - Wind immer in m/s, Zeit in Ortszeit des Standorts (`timezone=auto`).
+ *  - Open-Meteo zaehlt anteilig: mehr als 10 Variablen oder 14 Tage kosten mehr (budget.ts).
+ *  - Wind in m/s, Zeit in Ortszeit des Standorts (`timezone=auto`).
  *  - Jedes Ergebnis traegt `source` — CC BY 4.0 verlangt die Quellenangabe.
  */
 
-import { geoBucketKey, type IHuntingDog } from '@martinschmieschek/slopdogs-core';
+import type { IHuntingDog } from '@martinschmieschek/slopdogs-core';
+import type { OpenMeteoResponse } from './api';
 
-export const OPEN_METEO_SOURCE = 'Open-Meteo.com (CC BY 4.0)';
-export const OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
-export const OPEN_METEO_ARCHIVE_URL = 'https://archive-api.open-meteo.com/v1/archive';
-export const OPEN_METEO_SATELLITE_URL = 'https://satellite-api.open-meteo.com/v1/archive';
-
-/** Open-Meteo zaehlt Anfragen mit mehr Variablen anteilig mehrfach. */
-export const OPEN_METEO_MAX_VARIABLES = 10;
-
-const USER_AGENT = 'SlopDogs/0.3 (+https://github.com/MartinSchmieschek/SlopDogs)';
-const TIMEOUT_MS = 15_000;
+export * from './api';
+export * from './budget';
+export * from './cellStore';
+export * from './variableTtl';
 
 /** Wie `required`/`optional` in core: Konstruktoren mit beliebigen Argumenten. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type DogClass = new (...args: any[]) => IHuntingDog<unknown>;
-
-/** Was die Dogs aus einer Open-Meteo-Antwort lesen (forecast, archive, satellite sind gleich aufgebaut). */
-export interface OpenMeteoResponse {
-    latitude: number;
-    longitude: number;
-    elevation?: number;
-    timezone: string;
-    utc_offset_seconds?: number;
-    hourly?: Record<string, Array<number | string | null> | undefined>;
-    hourly_units?: Record<string, string>;
-}
 
 /** Standort, wie Open-Meteo ihn auf sein Raster gelegt hat */
 export interface OpenMeteoLocation {
@@ -77,40 +61,12 @@ export function todayUtc(now: Date = new Date()): string {
     return now.toISOString().slice(0, 10);
 }
 
-/** Cache-Schluessel: 1-km-Zelle (bucketM ausdruecklich — 1000 allein waere der Radius und ergaebe 200-m-Zellen) plus Parameter. */
-export function openMeteoCacheKey(prefix: string, lat: number, lng: number, extras: Record<string, string | number>): string {
-    return geoBucketKey(prefix, lat, lng, 1000, { bucketM: 1000, extras });
-}
-
-/** Baut die Abruf-URL: Ort, Ortszeit, Wind in m/s, dazu die eigenen Parameter. Wirft bei mehr als 10 Stundenvariablen. */
+/** Baut die Abruf-URL: Ort, Ortszeit, Wind in m/s, dazu die eigenen Parameter. */
 export function openMeteoUrl(base: string, lat: number, lng: number, params: Record<string, string | number>): string {
-    const hourly = String(params.hourly ?? '');
-    if (hourly && hourly.split(',').length > OPEN_METEO_MAX_VARIABLES) {
-        throw new Error(
-            `openMeteoUrl: ${hourly.split(',').length} hourly variables — Open-Meteo counts more than ${OPEN_METEO_MAX_VARIABLES} as several calls`,
-        );
-    }
     const all: Record<string, string | number> = { latitude: lat, longitude: lng, timezone: 'auto', wind_speed_unit: 'ms', ...params };
     return `${base}?${Object.entries(all)
         .map(([k, v]) => `${k}=${v}`)
         .join('&')}`;
-}
-
-/** Holt eine Open-Meteo-Antwort als JSON, mit Timeout und lesbarem Fehler (429/5xx stehen im Text — der Cache merkt sie sich kurz). */
-export async function fetchOpenMeteo(url: string, what: string): Promise<OpenMeteoResponse> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-    let res: Response;
-    try {
-        res = await fetch(url, { headers: { Accept: 'application/json', 'User-Agent': USER_AGENT }, signal: controller.signal });
-    } finally {
-        clearTimeout(timer);
-    }
-    if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        throw new Error(`Open-Meteo ${what} failed: ${res.status} ${res.statusText} ${text.slice(0, 200)}`);
-    }
-    return (await res.json()) as OpenMeteoResponse;
 }
 
 /** Ort aus der Antwort. */

@@ -7,7 +7,14 @@
  *  die Strahlungsfelder und die Tagessummen in kWh/m².
  */
 
-import { OPEN_METEO_SOURCE, hourlyRows, hourlyVariables, toLocation, type OpenMeteoResponse } from '@martinschmieschek/slopdogs-openmeteo';
+import {
+    OPEN_METEO_SOURCE,
+    hourlyRows,
+    hourlyVariables,
+    toLocation,
+    withStale,
+    type OpenMeteoResponse,
+} from '@martinschmieschek/slopdogs-openmeteo';
 import type { SolarDay, SolarHour, SolarRadiationResult } from './interfaces/solarTypes';
 
 /** Strahlung — alle drei Schnittstellen kennen sie unter diesen Namen. */
@@ -23,6 +30,11 @@ const WEATHER_FIELDS = { cloudCover: 'cloud_cover', temperature: 'temperature_2m
 /** `hourly=`-Liste: nur Strahlung oder Strahlung plus Wetter. */
 export function solarVariables(withWeather: boolean): string {
     return hourlyVariables(withWeather ? { ...RADIATION_FIELDS, ...WEATHER_FIELDS } : RADIATION_FIELDS);
+}
+
+/** Dieselben Variablen als Liste, fuer den Zellen-Speicher. */
+export function solarVariableList(withWeather: boolean): string[] {
+    return solarVariables(withWeather).split(',');
 }
 
 /** Open-Meteo-Stundenspalten → Stunden. */
@@ -54,7 +66,14 @@ export function dailyTotals(hours: SolarHour[]): SolarDay[] {
     }));
 }
 
-/** Baut das gemeinsame Ergebnis aus einer Open-Meteo-Antwort. */
-export function toResult(data: OpenMeteoResponse, hours: SolarHour[], kind: SolarRadiationResult['kind']): SolarRadiationResult {
-    return { location: toLocation(data), hours, days: dailyTotals(hours), kind, source: OPEN_METEO_SOURCE };
+/** Baut das gemeinsame Ergebnis aus einer Open-Meteo-Antwort; `stale` nur, wenn der Zellen-Speicher es meldet. */
+export function toResult(
+    data: OpenMeteoResponse & { stale?: boolean },
+    hours: SolarHour[],
+    kind: SolarRadiationResult['kind'],
+): SolarRadiationResult {
+    return withStale(
+        { location: toLocation(data), hours, days: dailyTotals(hours), kind, source: OPEN_METEO_SOURCE },
+        { stale: data.stale === true },
+    );
 }

@@ -6,20 +6,19 @@
 
 import { Dog, IHuntingSeason, type ICacheHandler, type ICacheable } from '@martinschmieschek/slopdogs-core';
 import {
-    OPEN_METEO_FORECAST_URL,
+    OPEN_METEO_FORECAST_DAYS,
     OPEN_METEO_SOURCE,
     aggregate,
     clampInt,
-    fetchOpenMeteo,
+    fetchCellVariables,
+    forecastCellRequest,
     groupByDate,
     hourlyRows,
     hourlyUnits,
-    hourlyVariables,
-    openMeteoCacheKey,
-    openMeteoUrl,
     parseLatLng,
+    sliceDays,
     toLocation,
-    todayUtc,
+    withStale,
     type DogClass,
 } from '@martinschmieschek/slopdogs-openmeteo';
 import type { SnowDay, SnowHour, SnowResult } from './interfaces/snowTypes';
@@ -46,13 +45,13 @@ function snowDays(hours: SnowHour[]): SnowDay[] {
     }));
 }
 
-export async function getSnow(lat: number, lng: number, days: number): Promise<SnowResult> {
-    const data = await fetchOpenMeteo(
-        openMeteoUrl(OPEN_METEO_FORECAST_URL, lat, lng, { hourly: hourlyVariables(FIELDS), forecast_days: days }),
-        'snow',
-    );
+export async function getSnow(lat: number, lng: number, days: number, cache?: ICacheHandler): Promise<SnowResult> {
+    const data = sliceDays(await fetchCellVariables(cache, forecastCellRequest(lat, lng, { hourly: Object.values(FIELDS) }, TTL_MS)), days);
     const hours: SnowHour[] = hourlyRows(data, FIELDS);
-    return { location: toLocation(data), hours, days: snowDays(hours), units: hourlyUnits(data, FIELDS), source: OPEN_METEO_SOURCE };
+    return withStale(
+        { location: toLocation(data), hours, days: snowDays(hours), units: hourlyUnits(data, FIELDS), source: OPEN_METEO_SOURCE },
+        data,
+    );
 }
 
 export class SnowRetriever extends Dog<SnowResult> implements ICacheable {
@@ -65,7 +64,7 @@ export class SnowRetriever extends Dog<SnowResult> implements ICacheable {
         return SnowRetriever.name;
     }
     get description(): string {
-        return 'Hourly snow forecast: snow depth (m), snowfall (cm), snowfall line and freezing level (m above sea level), temperature, precipitation, with daily sums and lowest snowfall line, for GPS coordinates. Open-Meteo, cached 1 h per 1 km cell.';
+        return 'Hourly snow forecast: snow depth (m), snowfall (cm), snowfall line and freezing level (m above sea level), temperature, precipitation, with daily sums and lowest snowfall line, for GPS coordinates. Up to 7 days. Shared Open-Meteo cell cache, data up to 60 min old.';
     }
     get icon(): string | undefined {
         return '❄️';
@@ -81,10 +80,8 @@ export class SnowRetriever extends Dog<SnowResult> implements ICacheable {
         const queryDog = season.exhausted.find((d) => this.matchesParent(SnowQueryPact, d));
         const query = (queryDog?.collected as SnowQuery | undefined) ?? ({} as SnowQuery);
         const { lat, lng } = parseLatLng(query, this.name);
-        const days = clampInt(query.days, 7, 1, 16);
+        const days = clampInt(query.days, 7, 1, OPEN_METEO_FORECAST_DAYS);
 
-        const fetchIt = () => getSnow(lat, lng, days);
-        if (!this.cacheHandler) return fetchIt();
-        return this.cacheHandler.getOrFetch(openMeteoCacheKey('snow', lat, lng, { days, date: todayUtc() }), TTL_MS, fetchIt);
+        return getSnow(lat, lng, days, this.cacheHandler);
     };
 }

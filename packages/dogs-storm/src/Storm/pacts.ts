@@ -12,7 +12,7 @@ export interface ThunderstormQuery {
     lat: string;
     /** Laengengrad */
     lng: string;
-    /** Vorhersage-Tage ab heute (default: 3, max: 16) */
+    /** Vorhersage-Tage ab heute (default: 3, max: 7) */
     days?: string;
 }
 

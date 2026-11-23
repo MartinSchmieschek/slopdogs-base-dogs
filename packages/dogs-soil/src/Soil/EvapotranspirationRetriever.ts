@@ -9,20 +9,19 @@
 
 import { Dog, IHuntingSeason, type ICacheHandler, type ICacheable } from '@martinschmieschek/slopdogs-core';
 import {
-    OPEN_METEO_FORECAST_URL,
+    OPEN_METEO_FORECAST_DAYS,
     OPEN_METEO_SOURCE,
     aggregate,
     clampInt,
-    fetchOpenMeteo,
+    fetchCellVariables,
+    forecastCellRequest,
     groupByDate,
     hourlyRows,
     hourlyUnits,
-    hourlyVariables,
-    openMeteoCacheKey,
-    openMeteoUrl,
     parseLatLng,
+    sliceDays,
     toLocation,
-    todayUtc,
+    withStale,
     type DogClass,
 } from '@martinschmieschek/slopdogs-openmeteo';
 import type { EvapotranspirationDay, EvapotranspirationHour, EvapotranspirationResult } from './interfaces/soilTypes';
@@ -60,17 +59,24 @@ export function waterBalanceDays(hours: EvapotranspirationHour[]): Evapotranspir
     });
 }
 
-export async function getEvapotranspiration(lat: number, lng: number, days: number): Promise<EvapotranspirationResult> {
-    const url = openMeteoUrl(OPEN_METEO_FORECAST_URL, lat, lng, { hourly: hourlyVariables(FIELDS), forecast_days: days });
-    const data = await fetchOpenMeteo(url, 'evapotranspiration');
+export async function getEvapotranspiration(
+    lat: number,
+    lng: number,
+    days: number,
+    cache?: ICacheHandler,
+): Promise<EvapotranspirationResult> {
+    const data = sliceDays(await fetchCellVariables(cache, forecastCellRequest(lat, lng, { hourly: Object.values(FIELDS) }, TTL_MS)), days);
     const hours: EvapotranspirationHour[] = hourlyRows(data, FIELDS);
-    return {
-        location: toLocation(data),
-        hours,
-        days: waterBalanceDays(hours),
-        units: hourlyUnits(data, FIELDS),
-        source: OPEN_METEO_SOURCE,
-    };
+    return withStale(
+        {
+            location: toLocation(data),
+            hours,
+            days: waterBalanceDays(hours),
+            units: hourlyUnits(data, FIELDS),
+            source: OPEN_METEO_SOURCE,
+        },
+        data,
+    );
 }
 
 export class EvapotranspirationRetriever extends Dog<EvapotranspirationResult> implements ICacheable {
@@ -83,7 +89,7 @@ export class EvapotranspirationRetriever extends Dog<EvapotranspirationResult> i
         return EvapotranspirationRetriever.name;
     }
     get description(): string {
-        return 'Hourly water balance forecast: reference evapotranspiration ET0 (FAO-56), modelled evapotranspiration, vapour pressure deficit, precipitation, temperature, with daily sums and water balance (precipitation minus ET0, negative = watering need), for GPS coordinates. Open-Meteo, cached 1 h per 1 km cell.';
+        return 'Hourly water balance forecast: reference evapotranspiration ET0 (FAO-56), modelled evapotranspiration, vapour pressure deficit, precipitation, temperature, with daily sums and water balance (precipitation minus ET0, negative = watering need), for GPS coordinates. Up to 7 days. Shared Open-Meteo cell cache, data up to 60 min old.';
     }
     get icon(): string | undefined {
         return '💧';
@@ -99,10 +105,8 @@ export class EvapotranspirationRetriever extends Dog<EvapotranspirationResult> i
         const queryDog = season.exhausted.find((d) => this.matchesParent(EvapotranspirationQueryPact, d));
         const query = (queryDog?.collected as EvapotranspirationQuery | undefined) ?? ({} as EvapotranspirationQuery);
         const { lat, lng } = parseLatLng(query, this.name);
-        const days = clampInt(query.days, 7, 1, 16);
+        const days = clampInt(query.days, 7, 1, OPEN_METEO_FORECAST_DAYS);
 
-        const fetchIt = () => getEvapotranspiration(lat, lng, days);
-        if (!this.cacheHandler) return fetchIt();
-        return this.cacheHandler.getOrFetch(openMeteoCacheKey('evapotranspiration', lat, lng, { days, date: todayUtc() }), TTL_MS, fetchIt);
+        return getEvapotranspiration(lat, lng, days, this.cacheHandler);
     };
 }

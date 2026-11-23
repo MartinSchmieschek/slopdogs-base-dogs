@@ -12,7 +12,7 @@ export interface SnowQuery {
     lat: string;
     /** Laengengrad */
     lng: string;
-    /** Vorhersage-Tage ab heute (default: 7, max: 16) */
+    /** Vorhersage-Tage ab heute (default: 7, max: 7) */
     days?: string;
 }
 

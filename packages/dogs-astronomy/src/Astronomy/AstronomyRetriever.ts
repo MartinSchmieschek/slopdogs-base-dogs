@@ -1,4 +1,11 @@
-import { Dog, IHuntingDog, IHuntingSeason, type ICacheHandler, type ICacheable, geoBucketKey } from '@martinschmieschek/slopdogs-core';
+import { Dog, IHuntingDog, IHuntingSeason, type ICacheHandler, type ICacheable } from '@martinschmieschek/slopdogs-core';
+import {
+    OPEN_METEO_FORECAST_DAYS,
+    OPEN_METEO_FORECAST_URL,
+    fetchCellVariables,
+    forecastCellRequest,
+    withStale,
+} from '@martinschmieschek/slopdogs-openmeteo';
 import { AstronomyQueryPact, type AstronomyQuery } from './pacts';
 
 export interface AstronomyMoon {
@@ -19,6 +26,48 @@ export interface AstronomyResult {
     sun: AstronomySun;
     moon: AstronomyMoon;
     date: string;
+    /** Nur gesetzt (true), wenn das Open-Meteo-Budget erschoepft ist und aeltere Daten aus dem Zellen-Speicher kommen */
+    stale?: boolean;
+}
+
+/** Dieselben Tagesvariablen liest SunRetriever — beide teilen sich die Vorhersage-Zelle. */
+const SUN_DAILY_VARIABLES = ['sunrise', 'sunset', 'daylight_duration', 'sunshine_duration', 'uv_index_max'];
+const MAX_AGE_MS = 60 * 60_000;
+const DAY_MS = 86_400_000;
+
+/** Liegt das Datum (UTC-Kalender, ein Tag Spielraum fuer Ortszeit) in den Tagen der Vorhersage-Zelle? */
+function inForecastCell(date: string, now = Date.now()): boolean {
+    const t = Date.parse(`${date}T00:00:00Z`);
+    const today = Date.parse(`${new Date(now).toISOString().slice(0, 10)}T00:00:00Z`);
+    return t >= today - DAY_MS && t <= today + OPEN_METEO_FORECAST_DAYS * DAY_MS;
+}
+
+/**
+ * Tageswerte eines Datums: aus der gemeinsamen Vorhersage-Zelle, wenn es dort liegt; sonst ein eigener
+ * Eintrag fuer genau diesen Tag (start_date = end_date), wie der Dog ihn schon immer abrief.
+ */
+async function sunDay(
+    lat: number,
+    lng: number,
+    date: string,
+    cache?: ICacheHandler,
+): Promise<{ daily: Record<string, Array<number | string | null> | undefined>; stale: boolean }> {
+    if (inForecastCell(date)) {
+        const cell = await fetchCellVariables(cache, forecastCellRequest(lat, lng, { daily: SUN_DAILY_VARIABLES }, MAX_AGE_MS));
+        const i = ((cell.daily?.time ?? []) as string[]).indexOf(date);
+        if (i >= 0) {
+            return { daily: Object.fromEntries(SUN_DAILY_VARIABLES.map((v) => [v, [cell.daily?.[v]?.[i] ?? null]])), stale: cell.stale };
+        }
+    }
+    const single = await fetchCellVariables(cache, {
+        api: OPEN_METEO_FORECAST_URL,
+        lat,
+        lng,
+        params: { forecast_days: 1, start_date: date, end_date: date },
+        daily: SUN_DAILY_VARIABLES,
+        maxAgeMs: MAX_AGE_MS,
+    });
+    return { daily: single.daily ?? {}, stale: single.stale };
 }
 
 const SYNODIC_MONTH = 29.53059;
@@ -55,7 +104,7 @@ export class AstronomyRetriever extends Dog<AstronomyResult> implements ICacheab
         return AstronomyRetriever.name;
     }
     get description(): string {
-        return 'Moon phase, sunrise/sunset, UV index and daylight data for given GPS coordinates.';
+        return 'Moon phase, sunrise/sunset, UV index and daylight data for given GPS coordinates. Shared Open-Meteo cell cache, data up to 60 min old.';
     }
     get icon(): string | undefined {
         return '\uD83C\uDF19';
@@ -78,38 +127,16 @@ export class AstronomyRetriever extends Dog<AstronomyResult> implements ICacheab
         }
 
         const dateStr = query.date || new Date().toISOString().split('T')[0];
-        // 1 km Zelle — Sonne/Mond aendern sich ueber diese Distanz nicht messbar.
-        const key = geoBucketKey('astronomy', lat, lng, 1000, { bucketM: 1000, extras: { date: dateStr } });
+        const { daily, stale } = await sunDay(lat, lng, dateStr, this.cacheHandler);
+        const first = (v: string) => daily[v]?.[0];
 
-        const fetchData = async (): Promise<AstronomyResult> => {
-            const ctrl = new AbortController();
-            const timer = setTimeout(() => ctrl.abort(), 15_000);
-            try {
-                const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&daily=sunrise,sunset,daylight_duration,sunshine_duration,uv_index_max&timezone=auto&forecast_days=1&start_date=${dateStr}&end_date=${dateStr}`;
-                const res = await fetch(url, { signal: ctrl.signal });
-                if (!res.ok) throw new Error(`Open-Meteo HTTP ${res.status}`);
-                const data = (await res.json()) as any;
-                const daily = data.daily;
-
-                const sun: AstronomySun = {
-                    sunrise: daily.sunrise?.[0] ?? '',
-                    sunset: daily.sunset?.[0] ?? '',
-                    daylightMinutes: Math.round((daily.daylight_duration?.[0] ?? 0) / 60),
-                    sunshineMinutes: Math.round((daily.sunshine_duration?.[0] ?? 0) / 60),
-                    uvIndexMax: daily.uv_index_max?.[0] ?? 0,
-                };
-
-                const moon = getMoonPhase(new Date(dateStr));
-
-                return { sun, moon, date: dateStr };
-            } finally {
-                clearTimeout(timer);
-            }
+        const sun: AstronomySun = {
+            sunrise: (first('sunrise') as string | undefined) ?? '',
+            sunset: (first('sunset') as string | undefined) ?? '',
+            daylightMinutes: Math.round(((first('daylight_duration') as number | undefined) ?? 0) / 60),
+            sunshineMinutes: Math.round(((first('sunshine_duration') as number | undefined) ?? 0) / 60),
+            uvIndexMax: (first('uv_index_max') as number | undefined) ?? 0,
         };
-
-        if (this.cacheHandler) {
-            return this.cacheHandler.getOrFetch(key, 60 * 60_000, fetchData);
-        }
-        return fetchData();
+        return withStale({ sun, moon: getMoonPhase(new Date(dateStr)), date: dateStr }, { stale });
     };
 }
