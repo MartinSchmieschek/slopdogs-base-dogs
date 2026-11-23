@@ -1,6 +1,6 @@
 {
   "name": "@martinschmieschek/slopdogs-dogs-rain-radar",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Regenradar: DWD-Niederschlagsradar (Analyse plus 2-h-Vorhersage in 5-min-Schritten) als kleines 1-km-Raster um einen GPS-Punkt, ueber Bright Sky",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
