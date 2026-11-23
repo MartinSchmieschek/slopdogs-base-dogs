@@ -1,5 +1,5 @@
 /**
- * Open-Meteo-Grundlage (slopdogs-openmeteo) und die Themen-Dogs wind, soil, snow, storm:
+ * Open-Meteo-Grundlage (slopdogs-openmeteo) und die Themen-Dogs wind, soil, snow, storm, humidity:
  * URL, Variablen (hoechstens 10), Zuschnitt auf eigene Feldnamen, Tageswerte, Einheiten,
  * Cache-Schluessel und Haltezeit. Fetch und Cache sind Attrappen — kein Netz.
  */
@@ -19,6 +19,7 @@ import {
     type EvapotranspirationResult,
 } from '@martinschmieschek/slopdogs-dogs-soil';
 import { SnowRetriever, SnowQueryPact, type SnowResult } from '@martinschmieschek/slopdogs-dogs-snow';
+import { HumidityRetriever, HumidityQueryPact, type HumidityResult } from '@martinschmieschek/slopdogs-dogs-humidity';
 import { ThunderstormRetriever, ThunderstormQueryPact, capeLevel, type ThunderstormResult } from '@martinschmieschek/slopdogs-dogs-storm';
 
 /** Antwort im Open-Meteo-Format: zwei Tage, jede angefragte Variable mit Wert = Stundenindex, Einheit "u:<variable>". */
@@ -174,4 +175,27 @@ test('ThunderstormRetriever: Gewitterstunden, CAPE-Stufe, 15 min', async () => {
     );
     assert.deepEqual(cache.ttls, [15 * 60_000]);
     assert.deepEqual([capeLevel(null), capeLevel(299), capeLevel(300), capeLevel(2500)], ['unknown', 'low', 'moderate', 'high']);
+});
+
+test('HumidityRetriever: Variablen, Tageswerte, 30 min je 1-km-Zelle', async () => {
+    const value = (v: string, i: number) =>
+        v === 'relative_humidity_2m' ? (i < 24 ? 80 + (i % 2) * 10 : 70) : v === 'wet_bulb_temperature_2m' ? -i : i;
+    const { result, url, cache } = await run<HumidityResult>(HumidityRetriever, HumidityQueryPact, PLACE, value);
+    assert.equal(
+        url.searchParams.get('hourly'),
+        'temperature_2m,relative_humidity_2m,dew_point_2m,wet_bulb_temperature_2m,vapour_pressure_deficit',
+    );
+    assert.equal(url.searchParams.get('forecast_days'), '7');
+    assert.equal(result.hours[1].relativeHumidity, 90);
+    assert.deepEqual(
+        result.days.map((d) => [d.relativeHumidityMean, d.relativeHumidityMax, d.wetBulbTemperatureMin]),
+        [
+            [85, 90, -23],
+            [70, 70, -47],
+        ],
+    );
+    assert.equal(result.units.dewPoint, 'u:dew_point_2m');
+    assert.equal(result.source, 'Open-Meteo.com (CC BY 4.0)');
+    assert.match(cache.keys[0], /^humidity:.*days=7/);
+    assert.deepEqual(cache.ttls, [30 * 60_000]);
 });

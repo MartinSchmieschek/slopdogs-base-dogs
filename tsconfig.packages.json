@@ -173,6 +173,9 @@
       "path": "./packages/dogs-snow/tsconfig.monorepo.json"
     },
     {
+      "path": "./packages/dogs-humidity/tsconfig.monorepo.json"
+    },
+    {
       "path": "./packages/dogs-storm/tsconfig.monorepo.json"
     }
   ]
