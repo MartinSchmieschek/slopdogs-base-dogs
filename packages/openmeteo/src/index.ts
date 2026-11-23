@@ -9,7 +9,7 @@
  *  haengen es als peerDependency an — wie geo-pact.
  *
  *  Regeln, die hier stecken:
- *  - Open-Meteo zaehlt anteilig: mehr als 10 Variablen oder 14 Tage kosten mehr (budget.ts).
+ *  - Open-Meteo zaehlt anteilig: max(1, Variablen/10 × max(1, Tage/14)) je Abruf (budget.ts).
  *  - Wind in m/s, Zeit in Ortszeit des Standorts (`timezone=auto`).
  *  - Jedes Ergebnis traegt `source` — CC BY 4.0 verlangt die Quellenangabe.
  */

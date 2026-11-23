@@ -177,6 +177,9 @@
     },
     {
       "path": "./packages/dogs-storm/tsconfig.monorepo.json"
+    },
+    {
+      "path": "./packages/dogs-rain-radar/tsconfig.monorepo.json"
     }
   ]
 }

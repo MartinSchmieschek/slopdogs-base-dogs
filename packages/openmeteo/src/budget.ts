@@ -22,12 +22,14 @@ export const OPEN_METEO_BUDGET_PER_HOUR = 4500;
 export const OPEN_METEO_BUDGET_PER_DAY = 9000;
 
 /**
- * Gewicht eines Abrufs nach der Regel des Anbieters: mehr als 10 Variablen oder mehr als 2 Wochen zaehlen
- * anteilig mehr; 15 Variablen ueber 2 Wochen = 1,5 (PLAN-OPEN-METEO-DOGS.md, Abschnitt 3 „Kontingent“).
- * Variablen zaehlen ueber hourly, daily und current zusammen.
+ * Gewicht eines Abrufs (ein Ort) wie im Open-Meteo-Server, `calculateQueryWeight` in
+ * https://github.com/open-meteo/open-meteo/blob/main/Sources/App/Helper/Writer/ForecastApiResult.swift:
+ * `max(1, (Variablen × Modelle / 10) × max(1, Tage / 14))`. Das `max(1, …)` gilt dem Produkt, nicht jedem
+ * Faktor: 5 Variablen ueber 28 Tage = 1, 15 Variablen ueber 14 Tage = 1,5. Variablen zaehlen ueber hourly,
+ * daily und current zusammen, Tage = forecast_days + past_days.
  */
-export function openMeteoCallWeight(variables: number, days: number): number {
-    return Math.max(1, variables / OPEN_METEO_MAX_VARIABLES) * Math.max(1, days / OPEN_METEO_FREE_PERIOD_DAYS);
+export function openMeteoCallWeight(variables: number, days: number, models = 1): number {
+    return Math.max(1, ((variables * models) / OPEN_METEO_MAX_VARIABLES) * Math.max(1, days / OPEN_METEO_FREE_PERIOD_DAYS));
 }
 
 /** Abruf verweigert: das Budget eines Fensters ist voll. */

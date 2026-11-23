@@ -70,11 +70,11 @@ function datesOf(url: URL): string[] {
     return Array.from({ length: past + forecast }, (_, k) => addDays(BASE_DATE, k - past));
 }
 
-/** Gewicht nach Open-Meteo-Regel, unabhaengig vom Paket nachgerechnet: max(1, Variablen/10) × max(1, Tage/14). */
+/** Gewicht nach Open-Meteo-Server (calculateQueryWeight), unabhaengig vom Paket nachgerechnet: max(1, Variablen/10 × max(1, Tage/14)). */
 export function vendorWeight(rawUrl: string): number {
     const url = new URL(rawUrl);
     const vars = ['hourly', 'daily', 'current'].reduce((n, s) => n + list(url.searchParams, s).length, 0);
-    return Math.max(1, vars / 10) * Math.max(1, datesOf(url).length / 14);
+    return Math.max(1, (vars / 10) * Math.max(1, datesOf(url).length / 14));
 }
 
 /** Open-Meteo-foermige Antwort auf eine URL. */

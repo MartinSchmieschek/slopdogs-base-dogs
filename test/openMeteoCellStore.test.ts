@@ -456,6 +456,10 @@ test('Gewicht nach Anbieter-Regel und Budget-Stand', async () => {
     assert.equal(openMeteoCallWeight(12, 7), 1.2);
     assert.equal(openMeteoCallWeight(10, 28), 2);
     assert.equal(Math.round(openMeteoCallWeight(40, 16) * 1000) / 1000, 4.571);
+    assert.equal(openMeteoCallWeight(5, 28), 1, 'max(1, …) gilt dem Produkt: 0,5 × 2 = 1, nicht 1 × 2');
+    assert.equal(openMeteoCallWeight(5, 42), 1.5);
+    assert.equal(openMeteoCallWeight(1, 92), 1);
+    assert.equal(openMeteoCallWeight(5, 7, 4), 2, 'Modelle multiplizieren die Variablen');
 
     await fetchCellVariables(cache.asHandler(), req(Array.from({ length: 15 }, (_, i) => `v${i}`)));
     assert.deepEqual(openMeteoBudgetStatus(), {
