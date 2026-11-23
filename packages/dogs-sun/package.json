@@ -1,6 +1,6 @@
 {
   "name": "@martinschmieschek/slopdogs-dogs-sun",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Sun: Sonnenauf-/untergang, Taglaenge, UV-Index per GPS aus dem Void",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
